@@ -1,11 +1,10 @@
 # auric-tui
 
-A terminal-based lossless audio player with a rich TUI interface.
+A robust lossless audio player for your terminal.
 
 ## Features
 
 - **Lossless Audio Support** - Play FLAC, ALAC, WAV, and other high-quality formats
-- **Modern TUI** - Beautiful terminal interface built with Ratatui
 - **Spectrum Analyzer** - Real-time audio visualization
 - **Album Art** - Displays embedded album artwork (in supported terminals)
 - **Library Management** - Organize music by folders with multi-select filtering
@@ -23,17 +22,17 @@ Requires [Rust](https://rustup.rs/) 1.70 or later.
 
 ```bash
 # Clone the repository
-git clone https://github.com/user/auric-tui.git
+git clone https://github.com/flntfnd/auric-tui.git
 cd auric-tui
 
 # Install
-cargo install --path .
+cargo install --path [/path/to/downloaded/file/].
 ```
 
 ### From GitHub directly
 
 ```bash
-cargo install --git https://github.com/user/auric-tui
+cargo install --git https://github.com/flntfnd/auric-tui
 ```
 
 After installation, run:
@@ -91,14 +90,14 @@ Press `,` to open settings:
 
 - **Theme** - Default, Dracula, or Gruvbox
 - **Spectrum Analyzer** - Toggle on/off for performance
-- **Album Art** - Toggle on/off
+- **Album Art** - Toggle on/off for performance
 
 Settings are persisted automatically.
 
 ## Supported Formats
 
 - FLAC
-- ALAC (Apple Lossless)
+- ALAC
 - WAV
 - MP3
 - AAC
