@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 pub mod shell;
+pub mod terminal_caps;
 pub mod theme;
 
 pub use shell::{
