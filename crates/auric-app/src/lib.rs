@@ -1784,7 +1784,7 @@ fn handle_artwork_command(app: &BootstrappedApp, args: &[String]) -> Result<()> 
 }
 
 fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
-    let sub = args.first().map(String::as_str).unwrap_or("render-once");
+    let sub = args.first().map(String::as_str).unwrap_or("preview");
     match sub {
         "render-once" => {
             let mut width = 120u16;
