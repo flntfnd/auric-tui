@@ -1,3 +1,5 @@
+pub mod player;
+
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
