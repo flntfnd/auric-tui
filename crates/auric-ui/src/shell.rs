@@ -113,6 +113,8 @@ pub struct ShellState {
     tracks_scroll: usize,
     input_mode: InputMode,
     filtered_track_indices: Vec<usize>,
+    file_browser: Option<crate::file_browser::FileBrowser>,
+    terminal_caps: crate::terminal_caps::TerminalCaps,
 }
 
 impl ShellState {
@@ -132,6 +134,8 @@ impl ShellState {
             tracks_scroll: 0,
             input_mode: InputMode::Normal,
             filtered_track_indices: Vec::new(),
+            file_browser: None,
+            terminal_caps: crate::terminal_caps::TerminalCaps::detect(),
         };
         state.rebuild_track_filter();
         state
@@ -196,6 +200,7 @@ impl ShellState {
         match self.input_mode {
             InputMode::TrackFilter => return self.handle_filter_key(key),
             InputMode::CommandPalette => return self.handle_command_palette_key(key),
+            InputMode::AddMusic | InputMode::Welcome => return self.handle_add_music_key(key),
             InputMode::Normal => {}
         }
 
@@ -220,6 +225,12 @@ impl ShellState {
                 self.enter_command_palette_mode()
             }
             KeyCode::Char('r') => return KeyAction::RefreshRequested,
+            KeyCode::Char('a') => {
+                self.file_browser = Some(crate::file_browser::FileBrowser::new(
+                    &home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")),
+                ));
+                self.input_mode = InputMode::AddMusic;
+            }
             _ => {}
         }
         KeyAction::Continue
@@ -328,6 +339,74 @@ impl ShellState {
         self.input_mode = InputMode::CommandPalette;
         self.command_palette_input.clear();
         self.status_message = Some(self.command_palette_status_line());
+    }
+
+    fn handle_add_music_key(&mut self, key: KeyEvent) -> KeyAction {
+        let browser = match self.file_browser.as_mut() {
+            Some(b) => b,
+            None => {
+                self.input_mode = InputMode::Normal;
+                return KeyAction::Continue;
+            }
+        };
+
+        if browser.input_focused {
+            match key.code {
+                KeyCode::Esc => {
+                    browser.input_focused = false;
+                }
+                KeyCode::Tab => {
+                    browser.input_focused = false;
+                }
+                KeyCode::Enter => {
+                    browser.apply_path_input();
+                    browser.input_focused = false;
+                }
+                KeyCode::Backspace => {
+                    browser.path_input.pop();
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    browser.path_input.clear();
+                }
+                KeyCode::Char(c) => {
+                    browser.path_input.push(c);
+                }
+                _ => {}
+            }
+            return KeyAction::Continue;
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.file_browser = None;
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Tab => {
+                browser.input_focused = true;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                browser.move_selection(1);
+                browser.sync_path_input_to_selected();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                browser.move_selection(-1);
+                browser.sync_path_input_to_selected();
+            }
+            KeyCode::Enter => {
+                browser.enter_selected();
+            }
+            KeyCode::Backspace | KeyCode::Char('h') => {
+                browser.go_up();
+            }
+            KeyCode::Char(' ') => {
+                let path = browser.current_dir().to_string_lossy().into_owned();
+                self.file_browser = None;
+                self.input_mode = InputMode::Normal;
+                return KeyAction::CommandSubmitted(format!("__add_root {path}"));
+            }
+            _ => {}
+        }
+        KeyAction::Continue
     }
 
     fn rebuild_track_filter(&mut self) {
@@ -449,6 +528,8 @@ enum InputMode {
     Normal,
     TrackFilter,
     CommandPalette,
+    AddMusic,
+    Welcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -772,6 +853,12 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
     }
     if state.input_mode == InputMode::CommandPalette {
         render_command_palette_overlay(frame, state, palette);
+    }
+    if state.input_mode == InputMode::AddMusic {
+        render_add_music_overlay(frame, state, palette, false);
+    }
+    if state.input_mode == InputMode::Welcome {
+        render_add_music_overlay(frame, state, palette, true);
     }
 
     areas
@@ -1164,6 +1251,149 @@ fn render_command_palette_overlay(frame: &mut Frame, state: &ShellState, palette
     frame.render_widget(paragraph, area);
 }
 
+fn render_add_music_overlay(
+    frame: &mut Frame,
+    state: &ShellState,
+    palette: &Palette,
+    is_welcome: bool,
+) {
+    let frame_area = frame.area();
+    let width = (frame_area.width * 60 / 100).max(40).min(frame_area.width.saturating_sub(4));
+    let height = (frame_area.height * 70 / 100).max(16).min(frame_area.height.saturating_sub(4));
+    let x = frame_area.x + (frame_area.width.saturating_sub(width)) / 2;
+    let y = frame_area.y + (frame_area.height.saturating_sub(height)) / 2;
+    let area = Rect::new(x, y, width, height);
+    frame.render_widget(Clear, area);
+
+    let title = if is_welcome { " Welcome to auric " } else { " Add Music " };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(palette.focus))
+        .style(Style::default().bg(palette.surface_1).fg(palette.text));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let content = Rect {
+        x: inner.x.saturating_add(1),
+        y: inner.y,
+        width: inner.width.saturating_sub(2),
+        height: inner.height,
+    };
+
+    if content.height < 4 || content.width < 10 {
+        return;
+    }
+
+    let browser = match &state.file_browser {
+        Some(b) => b,
+        None => return,
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    if is_welcome {
+        lines.push(Line::from(Span::styled(
+            "Add a folder to get started.",
+            Style::default().fg(palette.text_muted),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    let input_style = if browser.input_focused {
+        Style::default().fg(palette.text).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(palette.text_muted)
+    };
+    lines.push(Line::from(vec![
+        Span::styled("Path: ", Style::default().fg(palette.text_muted)),
+        Span::styled(&browser.path_input, input_style),
+        if browser.input_focused {
+            Span::styled("_", Style::default().fg(palette.focus).add_modifier(Modifier::SLOW_BLINK))
+        } else {
+            Span::raw("")
+        },
+    ]));
+    lines.push(Line::from(""));
+
+    let dir_display = browser
+        .current_dir()
+        .display()
+        .to_string()
+        .replace(
+            &home_dir()
+                .map(|h| h.display().to_string())
+                .unwrap_or_default(),
+            "~",
+        );
+    lines.push(Line::from(Span::styled(
+        format!("{dir_display}/"),
+        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+    )));
+
+    let entries = browser.entries();
+    let header_lines = lines.len() as u16;
+    let footer_lines = if state.terminal_caps.supports_drag_drop { 2u16 } else { 1u16 };
+    let max_visible = content.height.saturating_sub(header_lines + footer_lines + 1) as usize;
+    let start = if max_visible > 0 && browser.selected >= max_visible {
+        browser.selected - max_visible + 1
+    } else {
+        0
+    };
+    let end = (start + max_visible).min(entries.len());
+
+    if entries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (empty directory)",
+            Style::default().fg(palette.text_muted),
+        )));
+    } else {
+        for (i, entry) in entries[start..end].iter().enumerate() {
+            let actual_idx = start + i;
+            let is_selected = actual_idx == browser.selected;
+            let marker = if is_selected { ">" } else { " " };
+            let icon = if entry.is_dir { "/" } else { "" };
+            let style = if is_selected {
+                Style::default().fg(palette.text).bg(palette.selection_bg).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(palette.text)
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  {marker} {}{icon}", entry.name),
+                style,
+            )));
+        }
+    }
+
+    let used = lines.len() as u16;
+    let target = content.height.saturating_sub(footer_lines);
+    if used < target {
+        for _ in 0..(target - used) {
+            lines.push(Line::from(""));
+        }
+    }
+
+    let esc_label = if is_welcome { "esc skip" } else { "esc cancel" };
+    lines.push(Line::from(Span::styled(
+        format!("  space add  enter open  backspace up  tab path input  {esc_label}"),
+        Style::default().fg(palette.text_muted),
+    )));
+
+    if state.terminal_caps.supports_drag_drop {
+        lines.push(Line::from(Span::styled(
+            "  drag folders here to add",
+            Style::default().fg(palette.text_muted),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, content);
+}
+
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(std::path::PathBuf::from)
+}
+
 fn pane_block<'a>(title: &'a str, focused: bool, palette: &Palette) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
@@ -1319,6 +1549,8 @@ fn input_mode_label(mode: InputMode) -> &'static str {
         InputMode::Normal => "normal",
         InputMode::TrackFilter => "track-filter",
         InputMode::CommandPalette => "command",
+        InputMode::AddMusic => "add-music",
+        InputMode::Welcome => "welcome",
     }
 }
 

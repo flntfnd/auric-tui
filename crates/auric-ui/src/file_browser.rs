@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone)]
 pub struct FileBrowser {
     current_dir: PathBuf,
     entries: Vec<DirEntry>,

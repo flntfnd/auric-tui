@@ -1,5 +1,6 @@
 use std::env;
 
+#[derive(Debug, Clone)]
 pub struct TerminalCaps {
     pub supports_drag_drop: bool,
     pub terminal_name: String,
