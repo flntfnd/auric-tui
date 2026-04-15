@@ -1,7 +1,8 @@
 use crate::theme::Palette;
 use crate::UiError;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
@@ -684,6 +685,8 @@ fn run_interactive_with_optional_handlers(
         execute!(stdout, EnableMouseCapture)
             .map_err(|e| UiError::Terminal(format!("enable mouse capture failed: {e}")))?;
     }
+    execute!(stdout, EnableBracketedPaste)
+        .map_err(|e| UiError::Terminal(format!("enable bracketed paste failed: {e}")))?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)
@@ -698,6 +701,7 @@ fn run_interactive_with_optional_handlers(
         command_handler,
     );
 
+    let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
     if options.mouse {
         let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
     }
@@ -762,7 +766,51 @@ fn run_loop(
                     }
                 }
                 Event::Resize(_, _) => {}
-                Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
+                Event::Paste(content) => {
+                    let paths: Vec<String> = content
+                        .lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                        .collect();
+
+                    for path_str in paths {
+                        let path = std::path::Path::new(&path_str);
+                        if path.is_dir() {
+                            match state.input_mode {
+                                InputMode::AddMusic | InputMode::Welcome => {
+                                    if let Some(browser) = state.file_browser.as_mut() {
+                                        browser.navigate_to(path);
+                                    }
+                                }
+                                InputMode::Normal => {
+                                    if let Some(handler) = command_handler.as_mut() {
+                                        match (*handler)(&format!("__add_root {path_str}")) {
+                                            Ok(result) => {
+                                                state.status_message =
+                                                    Some(result.status_message);
+                                                if result.refresh_requested {
+                                                    try_refresh_snapshot(
+                                                        state,
+                                                        &mut refresh,
+                                                    );
+                                                }
+                                            }
+                                            Err(err) => {
+                                                state.status_message =
+                                                    Some(format!("Drop failed: {err}"));
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            state.status_message =
+                                Some(format!("Not a directory: {path_str}"));
+                        }
+                    }
+                }
+                Event::FocusGained | Event::FocusLost => {}
             }
         }
         last_draw = Instant::now();
