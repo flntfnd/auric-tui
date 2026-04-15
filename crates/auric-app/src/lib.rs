@@ -400,7 +400,7 @@ fn current_track_id(state: &PlaybackState) -> Option<TrackId> {
 
 pub fn run_cli() -> Result<()> {
     let mut args = env::args().skip(1);
-    let command = args.next().unwrap_or_else(|| "init".to_string());
+    let command = args.next().unwrap_or_else(|| "ui".to_string());
     let config_path = resolve_config_path();
 
     match command.as_str() {
