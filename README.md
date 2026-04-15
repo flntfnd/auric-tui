@@ -57,7 +57,74 @@ Auric targets high-resolution and lossless playback, capability-aware terminal r
 
 ### From source
 
-Requires [Rust](https://rustup.rs/) 1.79 or later.
+Requires [Rust](https://rustup.rs/) 1.79 or later and a working C compiler for the bundled SQLite.
+
+#### macOS
+
+Xcode Command Line Tools provides the C compiler. If you don't have Rust yet:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then build:
+
+```sh
+git clone https://github.com/flntfnd/auric-tui.git
+cd auric-tui
+cargo install --path crates/auric-app
+```
+
+#### Linux
+
+Install Rust and the system dependencies for audio (ALSA headers). The C compiler and pkg-config are also required.
+
+**Debian / Ubuntu:**
+
+```sh
+sudo apt update && sudo apt install -y build-essential pkg-config libasound2-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+**Fedora / RHEL / CentOS:**
+
+```sh
+sudo dnf install -y gcc pkg-config alsa-lib-devel
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+**Arch Linux:**
+
+```sh
+sudo pacman -S base-devel alsa-lib pkg-config
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then build:
+
+```sh
+git clone https://github.com/flntfnd/auric-tui.git
+cd auric-tui
+cargo install --path crates/auric-app
+```
+
+#### Windows
+
+Install [Rust](https://rustup.rs/) (this includes the MSVC build tools prompt if Visual Studio isn't already installed). Then from PowerShell or Command Prompt:
+
+```powershell
+git clone https://github.com/flntfnd/auric-tui.git
+cd auric-tui
+cargo install --path crates/auric-app
+```
+
+No additional system libraries are needed on Windows -- cpal uses WASAPI which is built into the OS, and SQLite is bundled.
+
+The binary installs to `%USERPROFILE%\.cargo\bin\auric.exe`.
+
+#### Manual build (all platforms)
+
+If you prefer not to install to your Cargo bin directory:
 
 ```sh
 git clone https://github.com/flntfnd/auric-tui.git
@@ -65,30 +132,37 @@ cd auric-tui
 cargo build --release
 ```
 
-The binary is at `target/release/auric`.
-
-To install it to your Cargo bin directory:
-
-```sh
-cargo install --path crates/auric-app
-```
+The binary is at `target/release/auric` (or `target\release\auric.exe` on Windows).
 
 ### From releases
 
-Pre-built binaries for macOS (Apple Silicon and Intel) and Linux (x86_64) are available on the [Releases](https://github.com/flntfnd/auric-tui/releases) page.
+Pre-built binaries are available on the [Releases](https://github.com/flntfnd/auric-tui/releases) page.
+
+**macOS:**
 
 ```sh
-# macOS (Apple Silicon)
+# Apple Silicon
 curl -L https://github.com/flntfnd/auric-tui/releases/latest/download/auric-aarch64-apple-darwin.tar.gz | tar xz
 sudo mv auric /usr/local/bin/
 
-# macOS (Intel)
+# Intel
 curl -L https://github.com/flntfnd/auric-tui/releases/latest/download/auric-x86_64-apple-darwin.tar.gz | tar xz
 sudo mv auric /usr/local/bin/
+```
 
-# Linux (x86_64)
+**Linux:**
+
+```sh
 curl -L https://github.com/flntfnd/auric-tui/releases/latest/download/auric-x86_64-unknown-linux-gnu.tar.gz | tar xz
 sudo mv auric /usr/local/bin/
+```
+
+**Windows (PowerShell):**
+
+```powershell
+Invoke-WebRequest -Uri https://github.com/flntfnd/auric-tui/releases/latest/download/auric-x86_64-pc-windows-msvc.zip -OutFile auric.zip
+Expand-Archive auric.zip -DestinationPath .
+Move-Item auric.exe "$env:USERPROFILE\.cargo\bin\auric.exe"
 ```
 
 ## Quick start
