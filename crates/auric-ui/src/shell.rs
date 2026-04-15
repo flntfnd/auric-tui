@@ -116,6 +116,7 @@ pub struct ShellState {
     filtered_track_indices: Vec<usize>,
     file_browser: Option<crate::file_browser::FileBrowser>,
     terminal_caps: crate::terminal_caps::TerminalCaps,
+    scanning_path: Option<String>,
 }
 
 impl ShellState {
@@ -137,6 +138,7 @@ impl ShellState {
             filtered_track_indices: Vec::new(),
             file_browser: None,
             terminal_caps: crate::terminal_caps::TerminalCaps::detect(),
+            scanning_path: None,
         };
         state.rebuild_track_filter();
         // Auto-trigger welcome panel on empty library
@@ -565,11 +567,26 @@ impl Default for RunOptions {
 
 type RefreshSnapshotFn<'a> = dyn FnMut() -> Result<ShellSnapshot, UiError> + 'a;
 type CommandPaletteFn<'a> = dyn FnMut(&str) -> Result<PaletteCommandResult, UiError> + 'a;
+type BackgroundScanFn<'a> =
+    dyn FnMut(String) -> std::sync::mpsc::Receiver<ScanProgress> + 'a;
+
+/// Progress messages sent from a background scan thread.
+#[derive(Debug, Clone)]
+pub enum ScanProgress {
+    /// Periodic progress update: discovered N files so far.
+    Progress { discovered: usize, path: String },
+    /// Scan completed successfully.
+    Done { message: String },
+    /// Scan failed.
+    Error { message: String },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteCommandResult {
     pub status_message: String,
     pub refresh_requested: bool,
+    /// If set, the event loop should spawn a background scan for this path.
+    pub background_scan_path: Option<String>,
 }
 
 impl PaletteCommandResult {
@@ -577,6 +594,18 @@ impl PaletteCommandResult {
         Self {
             status_message: status_message.into(),
             refresh_requested,
+            background_scan_path: None,
+        }
+    }
+
+    pub fn with_background_scan(
+        status_message: impl Into<String>,
+        scan_path: String,
+    ) -> Self {
+        Self {
+            status_message: status_message.into(),
+            refresh_requested: false,
+            background_scan_path: Some(scan_path),
         }
     }
 }
@@ -635,7 +664,7 @@ pub fn run_interactive(
     palette: &Palette,
     options: RunOptions,
 ) -> Result<(), UiError> {
-    run_interactive_with_optional_handlers(state, palette, options, None, None)
+    run_interactive_with_optional_handlers(state, palette, options, None, None, None)
 }
 
 pub fn run_interactive_with_refresh<F>(
@@ -647,7 +676,7 @@ pub fn run_interactive_with_refresh<F>(
 where
     F: FnMut() -> Result<ShellSnapshot, UiError>,
 {
-    run_interactive_with_optional_handlers(state, palette, options, Some(&mut refresh), None)
+    run_interactive_with_optional_handlers(state, palette, options, Some(&mut refresh), None, None)
 }
 
 pub fn run_interactive_with_handlers<FRefresh, FCommand>(
@@ -667,6 +696,30 @@ where
         options,
         Some(&mut refresh),
         Some(&mut command_handler),
+        None,
+    )
+}
+
+pub fn run_interactive_with_scan<FRefresh, FCommand, FScan>(
+    state: &mut ShellState,
+    palette: &Palette,
+    options: RunOptions,
+    mut refresh: FRefresh,
+    mut command_handler: FCommand,
+    mut scan_handler: FScan,
+) -> Result<(), UiError>
+where
+    FRefresh: FnMut() -> Result<ShellSnapshot, UiError>,
+    FCommand: FnMut(&str) -> Result<PaletteCommandResult, UiError>,
+    FScan: FnMut(String) -> std::sync::mpsc::Receiver<ScanProgress>,
+{
+    run_interactive_with_optional_handlers(
+        state,
+        palette,
+        options,
+        Some(&mut refresh),
+        Some(&mut command_handler),
+        Some(&mut scan_handler),
     )
 }
 
@@ -676,6 +729,7 @@ fn run_interactive_with_optional_handlers(
     options: RunOptions,
     refresh: Option<&mut RefreshSnapshotFn<'_>>,
     command_handler: Option<&mut CommandPaletteFn<'_>>,
+    scan_handler: Option<&mut BackgroundScanFn<'_>>,
 ) -> Result<(), UiError> {
     enable_raw_mode().map_err(|e| UiError::Terminal(format!("enable_raw_mode failed: {e}")))?;
     let mut stdout = io::stdout();
@@ -699,6 +753,7 @@ fn run_interactive_with_optional_handlers(
         options,
         refresh,
         command_handler,
+        scan_handler,
     );
 
     let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
@@ -719,11 +774,67 @@ fn run_loop(
     options: RunOptions,
     mut refresh: Option<&mut RefreshSnapshotFn<'_>>,
     mut command_handler: Option<&mut CommandPaletteFn<'_>>,
+    mut scan_handler: Option<&mut BackgroundScanFn<'_>>,
 ) -> Result<(), UiError> {
+    use std::sync::mpsc;
+
     let mut last_draw = Instant::now();
     let mut last_areas = RenderAreas::default();
+    let mut scan_rx: Option<mpsc::Receiver<ScanProgress>> = None;
+
+    // Helper closure: handle a PaletteCommandResult, optionally starting a background scan.
+    let handle_command_result = |state: &mut ShellState,
+                                 result: PaletteCommandResult,
+                                 refresh: &mut Option<&mut RefreshSnapshotFn<'_>>,
+                                 scan_handler: &mut Option<&mut BackgroundScanFn<'_>>,
+                                 scan_rx: &mut Option<mpsc::Receiver<ScanProgress>>| {
+        state.status_message = Some(result.status_message);
+        if result.refresh_requested {
+            try_refresh_snapshot(state, refresh);
+        }
+        if let Some(scan_path) = result.background_scan_path {
+            if let Some(handler) = scan_handler.as_mut() {
+                state.scanning_path = Some(scan_path.clone());
+                state.status_message = Some(format!("Scanning {}...", scan_path));
+                *scan_rx = Some((*handler)(scan_path));
+            }
+        }
+    };
 
     loop {
+        // Poll background scan progress (non-blocking)
+        if let Some(rx) = &scan_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(ScanProgress::Progress { discovered, path }) => {
+                        state.status_message =
+                            Some(format!("Scanning {path}... ({discovered} files found)"));
+                    }
+                    Ok(ScanProgress::Done { message }) => {
+                        state.scanning_path = None;
+                        state.status_message = Some(message);
+                        try_refresh_snapshot(state, &mut refresh);
+                        break;
+                    }
+                    Ok(ScanProgress::Error { message }) => {
+                        state.scanning_path = None;
+                        state.status_message = Some(format!("Scan failed: {message}"));
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        state.scanning_path = None;
+                        state.status_message = Some("Scan finished".to_string());
+                        try_refresh_snapshot(state, &mut refresh);
+                        break;
+                    }
+                }
+            }
+            if state.scanning_path.is_none() {
+                scan_rx = None;
+            }
+        }
+
         terminal
             .draw(|f| {
                 last_areas = draw_shell(f, state, palette);
@@ -744,10 +855,13 @@ fn run_loop(
                         if let Some(handler) = command_handler.as_mut() {
                             match (*handler)(&command) {
                                 Ok(result) => {
-                                    state.status_message = Some(result.status_message);
-                                    if result.refresh_requested {
-                                        try_refresh_snapshot(state, &mut refresh);
-                                    }
+                                    handle_command_result(
+                                        state,
+                                        result,
+                                        &mut refresh,
+                                        &mut scan_handler,
+                                        &mut scan_rx,
+                                    );
                                 }
                                 Err(err) => {
                                     state.status_message = Some(format!("Command failed: {err}"));
@@ -786,14 +900,13 @@ fn run_loop(
                                     if let Some(handler) = command_handler.as_mut() {
                                         match (*handler)(&format!("__add_root {path_str}")) {
                                             Ok(result) => {
-                                                state.status_message =
-                                                    Some(result.status_message);
-                                                if result.refresh_requested {
-                                                    try_refresh_snapshot(
-                                                        state,
-                                                        &mut refresh,
-                                                    );
-                                                }
+                                                handle_command_result(
+                                                    state,
+                                                    result,
+                                                    &mut refresh,
+                                                    &mut scan_handler,
+                                                    &mut scan_rx,
+                                                );
                                             }
                                             Err(err) => {
                                                 state.status_message =
@@ -1254,7 +1367,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
     } else {
         format!("  filter: /{}", state.track_filter_query)
     };
-    lines.push(Line::from(vec![
+    let mut title_spans = vec![
         Span::styled(
             state.snapshot.app_title.clone(),
             Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
@@ -1263,13 +1376,24 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
             format!("  {} tracks{filter_info}", state.snapshot.tracks.len()),
             Style::default().fg(palette.text_muted),
         ),
-    ]));
+    ];
+    if state.scanning_path.is_some() {
+        title_spans.push(Span::styled(
+            "  [scanning...]",
+            Style::default().fg(palette.warning).add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.push(Line::from(title_spans));
     lines.push(Line::from(Span::styled(
         state
             .status_message
             .clone()
             .unwrap_or_else(|| default_status_message().to_string()),
-        Style::default().fg(palette.text_muted),
+        Style::default().fg(if state.scanning_path.is_some() {
+            palette.accent
+        } else {
+            palette.text_muted
+        }),
     )));
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(paragraph, content_area);

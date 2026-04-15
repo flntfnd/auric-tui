@@ -10,8 +10,9 @@ use auric_library::watch::{WatchOptions, WatchSessionSummary, WatchedFolderServi
 use auric_library::{LibraryRoot, TrackRecord};
 use auric_ui::ThemeStore;
 use auric_ui::{
-    render_once_to_text, run_interactive_with_handlers, FsThemeStore, IconMode, Palette,
-    PaletteCommandResult, RunOptions, ShellListItem, ShellSnapshot, ShellState, ShellTrackItem,
+    render_once_to_text, run_interactive_with_scan, FsThemeStore, IconMode, Palette,
+    PaletteCommandResult, RunOptions, ScanProgress, ShellListItem, ShellSnapshot, ShellState,
+    ShellTrackItem,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -1824,7 +1825,15 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
             let (palette, snapshot) = load_ui_palette_and_snapshot(app);
             let mut state = ShellState::new(snapshot);
             let app_cell = std::cell::RefCell::new(app);
-            run_interactive_with_handlers(
+            let lib_config = {
+                let app_ref = app_cell.borrow();
+                app_ref.config.library.clone()
+            };
+            let db_path = {
+                let app_ref = app_cell.borrow();
+                app_ref.db.path().unwrap_or(Path::new("")).to_path_buf()
+            };
+            run_interactive_with_scan(
                 &mut state,
                 &palette,
                 RunOptions {
@@ -1838,8 +1847,49 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                 |input| {
                     let mut app_ref = app_cell.borrow_mut();
                     execute_ui_palette_command(&mut app_ref, input).map_err(|e| {
-                    auric_ui::UiError::Terminal(format!("palette command failed: {e}"))
+                        auric_ui::UiError::Terminal(format!("palette command failed: {e}"))
                     })
+                },
+                {
+                    let lib_config = lib_config.clone();
+                    let db_path = db_path.clone();
+                    move |scan_path: String| {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let lib_config = lib_config.clone();
+                        let db_path = db_path.clone();
+                        std::thread::spawn(move || {
+                            let scan_result = (|| -> anyhow::Result<ScanSummary> {
+                                let mut db = Database::open(&DatabaseOptions {
+                                    path: db_path,
+                                    ..DatabaseOptions::default()
+                                })?;
+                                let scanner = scanner_from_config(&lib_config, false);
+                                let summary = scanner.scan_path(
+                                    &mut db,
+                                    std::path::Path::new(&scan_path),
+                                )?;
+                                Ok(summary)
+                            })();
+                            match scan_result {
+                                Ok(summary) => {
+                                    let _ = tx.send(ScanProgress::Done {
+                                        message: format!(
+                                            "Scan complete: {} (imported {} tracks in {}ms)",
+                                            summary.root_path,
+                                            summary.imported_tracks,
+                                            summary.elapsed_ms,
+                                        ),
+                                    });
+                                }
+                                Err(err) => {
+                                    let _ = tx.send(ScanProgress::Error {
+                                        message: format!("{err:#}"),
+                                    });
+                                }
+                            }
+                        });
+                        rx
+                    }
                 },
             )?;
         }
@@ -1910,19 +1960,13 @@ fn execute_ui_palette_command(
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("internal error: __add_root with no path"))?;
-            let row = app.db.upsert_library_root(&LibraryRoot {
+            app.db.upsert_library_root(&LibraryRoot {
                 path: path.clone(),
                 watched: true,
             })?;
-            let prune = false;
-            let scanner = scanner_from_config(&app.config.library, prune);
-            let summary = scanner.scan_path(&mut app.db, std::path::Path::new(&row.path))?;
-            Ok(PaletteCommandResult::new(
-                format!(
-                    "Added {} (imported {} tracks)",
-                    row.path, summary.imported_tracks
-                ),
-                true,
+            Ok(PaletteCommandResult::with_background_scan(
+                format!("Added {path}, scanning..."),
+                path,
             ))
         }
         other => Ok(PaletteCommandResult::new(

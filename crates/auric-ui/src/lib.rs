@@ -7,8 +7,9 @@ pub mod theme;
 
 pub use shell::{
     render_once_to_text, run_interactive, run_interactive_with_handlers,
-    run_interactive_with_refresh, FocusPane, IconMode, PaletteCommandResult, RunOptions,
-    ShellListItem, ShellSnapshot, ShellState, ShellTrackItem,
+    run_interactive_with_refresh, run_interactive_with_scan, FocusPane, IconMode,
+    PaletteCommandResult, RunOptions, ScanProgress, ShellListItem, ShellSnapshot, ShellState,
+    ShellTrackItem,
 };
 pub use theme::{FsThemeStore, Palette};
 
