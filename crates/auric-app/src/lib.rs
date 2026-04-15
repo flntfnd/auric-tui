@@ -1905,6 +1905,26 @@ fn execute_ui_palette_command(
             "watch commands are not supported in the interactive preview shell (run from CLI)",
             false,
         )),
+        "__add_root" => {
+            let path = strip_n_words(command, 1)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("internal error: __add_root with no path"))?;
+            let row = app.db.upsert_library_root(&LibraryRoot {
+                path: path.clone(),
+                watched: true,
+            })?;
+            let prune = false;
+            let scanner = scanner_from_config(&app.config.library, prune);
+            let summary = scanner.scan_path(&mut app.db, std::path::Path::new(&row.path))?;
+            Ok(PaletteCommandResult::new(
+                format!(
+                    "Added {} (imported {} tracks)",
+                    row.path, summary.imported_tracks
+                ),
+                true,
+            ))
+        }
         other => Ok(PaletteCommandResult::new(
             format!("Unknown command: {other} (use 'help')"),
             false,
