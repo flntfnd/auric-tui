@@ -2293,6 +2293,48 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
                 app.config.ui.icon_pack
             ),
         ],
+        playback_status: match app.playback_state.session.status {
+            PlaybackStatus::Playing => "playing",
+            PlaybackStatus::Paused => "paused",
+            PlaybackStatus::Stopped => "stopped",
+        }
+        .to_string(),
+        now_playing_title: app
+            .playback_state
+            .current_entry()
+            .and_then(|e| e.title.clone())
+            .unwrap_or_default(),
+        now_playing_artist: app
+            .playback_state
+            .current_entry()
+            .and_then(|e| e.artist.clone())
+            .unwrap_or_default(),
+        now_playing_album: app
+            .playback_state
+            .current_entry()
+            .and_then(|e| e.album.clone())
+            .unwrap_or_default(),
+        now_playing_duration_ms: app
+            .playback_state
+            .current_entry()
+            .and_then(|e| e.duration_ms)
+            .unwrap_or(0) as u64,
+        now_playing_position_ms: app.playback_state.session.position_ms,
+        volume: app.playback_state.session.volume,
+        shuffle: app.playback_state.session.shuffle,
+        repeat_mode: match app.playback_state.session.repeat {
+            RepeatMode::Off => "off",
+            RepeatMode::One => "one",
+            RepeatMode::All => "all",
+        }
+        .to_string(),
+        queue_length: app.playback_state.queue.len(),
+        queue_position: app
+            .playback_state
+            .session
+            .current_index
+            .map(|i| i + 1)
+            .unwrap_or(0),
     }
 }
 

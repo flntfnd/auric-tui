@@ -96,6 +96,17 @@ pub struct ShellSnapshot {
     pub tracks: Vec<ShellTrackItem>,
     pub feature_summary: Vec<(String, bool)>,
     pub status_lines: Vec<String>,
+    pub playback_status: String,
+    pub now_playing_title: String,
+    pub now_playing_artist: String,
+    pub now_playing_album: String,
+    pub now_playing_duration_ms: u64,
+    pub now_playing_position_ms: u64,
+    pub volume: f32,
+    pub shuffle: bool,
+    pub repeat_mode: String,
+    pub queue_length: usize,
+    pub queue_position: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +128,9 @@ pub struct ShellState {
     file_browser: Option<crate::file_browser::FileBrowser>,
     terminal_caps: crate::terminal_caps::TerminalCaps,
     scanning_path: Option<String>,
+    pub playback_position_ms: u64,
+    pub playback_duration_ms: u64,
+    pub playback_status: String,
 }
 
 impl ShellState {
@@ -139,6 +153,9 @@ impl ShellState {
             file_browser: None,
             terminal_caps: crate::terminal_caps::TerminalCaps::detect(),
             scanning_path: None,
+            playback_position_ms: 0,
+            playback_duration_ms: 0,
+            playback_status: "stopped".to_string(),
         };
         state.rebuild_track_filter();
         // Auto-trigger welcome panel on empty library
@@ -1880,6 +1897,17 @@ mod tests {
                 ("mouse".into(), true),
             ],
             status_lines: vec!["ready".into()],
+            playback_status: "stopped".to_string(),
+            now_playing_title: String::new(),
+            now_playing_artist: String::new(),
+            now_playing_album: String::new(),
+            now_playing_duration_ms: 0,
+            now_playing_position_ms: 0,
+            volume: 1.0,
+            shuffle: false,
+            repeat_mode: "off".to_string(),
+            queue_length: 0,
+            queue_position: 0,
         })
     }
 
