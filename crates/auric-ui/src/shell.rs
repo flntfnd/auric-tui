@@ -1284,6 +1284,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from("Tab / Shift-Tab: switch pane focus"),
+        Line::from("a: add music folder"),
         Line::from("j/k or arrows: move selection"),
         Line::from("PgUp/PgDn: page movement"),
         Line::from("g / G: first / last"),
@@ -1596,7 +1597,7 @@ fn fake_visualizer_line(width: u16) -> String {
 }
 
 fn default_status_message() -> &'static str {
-    "Tab: switch pane | /: track filter | : cmd palette | r: refresh | q: quit | ?: help"
+    "Tab: panes  a: add music  /: filter  :: commands  ?: help  q: quit"
 }
 
 fn track_matches_query(track: &ShellTrackItem, query: &str) -> bool {
