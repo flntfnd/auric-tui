@@ -1952,7 +1952,7 @@ fn execute_ui_palette_command(
         "root" => execute_palette_root_command(app, command, &words),
         "playlist" => execute_palette_playlist_command(app, command, &words),
         "watch" => Ok(PaletteCommandResult::new(
-            "watch commands are not supported in the interactive preview shell (run from CLI)",
+            "watch commands are not supported in the interactive shell (run from CLI)",
             false,
         )),
         "__add_root" => {
@@ -2254,7 +2254,7 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
         .count();
 
     ShellSnapshot {
-        app_title: "Auric TUI Preview".to_string(),
+        app_title: "auric".to_string(),
         theme_name: app.config.ui.theme.clone(),
         color_scheme: app.config.ui.color_scheme.clone(),
         icon_mode: IconMode::from_config(&app.config.ui.icon_pack),

@@ -1404,7 +1404,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
     frame.render_widget(Clear, area);
     let lines = vec![
         Line::from(Span::styled(
-            "Auric TUI Preview Help",
+            "Auric Keyboard Shortcuts",
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from("Tab / Shift-Tab: switch pane focus"),
@@ -1417,7 +1417,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
         Line::from("Mouse click: focus pane + select row"),
         Line::from("Mouse wheel: scroll selected pane"),
         Line::from("q or Ctrl-C: quit"),
-        Line::from("r: refresh preview snapshot"),
+        Line::from("r: refresh library"),
         Line::from("?: toggle this help"),
     ];
     let paragraph = Paragraph::new(lines)
@@ -1753,7 +1753,7 @@ fn try_refresh_snapshot(state: &mut ShellState, refresh: &mut Option<&mut Refres
                 let total_tracks = snapshot.tracks.len();
                 state.replace_snapshot(snapshot);
                 state.status_message = Some(format!(
-                    "Refreshed preview snapshot (tracks loaded: {total_tracks})"
+                    "Library refreshed ({total_tracks} tracks)"
                 ));
             }
             Err(err) => {
