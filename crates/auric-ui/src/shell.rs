@@ -138,6 +138,13 @@ impl ShellState {
             terminal_caps: crate::terminal_caps::TerminalCaps::detect(),
         };
         state.rebuild_track_filter();
+        // Auto-trigger welcome panel on empty library
+        if state.snapshot.roots.is_empty() && state.snapshot.tracks.is_empty() {
+            state.input_mode = InputMode::Welcome;
+            state.file_browser = Some(crate::file_browser::FileBrowser::new(
+                &home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")),
+            ));
+        }
         state
     }
 
@@ -866,7 +873,18 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
 
 fn render_roots(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
     let items: Vec<ListItem> = if state.snapshot.roots.is_empty() {
-        vec![ListItem::new(Line::from("No library roots"))]
+        vec![
+            ListItem::new(Line::from("")),
+            ListItem::new(Line::from(Span::styled(
+                "No library roots",
+                Style::default().fg(palette.text_muted),
+            ))),
+            ListItem::new(Line::from("")),
+            ListItem::new(Line::from(Span::styled(
+                "  Press a to add a music folder",
+                Style::default().fg(palette.text_muted),
+            ))),
+        ]
     } else {
         state
             .snapshot
@@ -1032,12 +1050,42 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
     frame.render_widget(Paragraph::new(header), header_area);
 
     let items: Vec<ListItem> = if state.filtered_track_count() == 0 {
-        let message = if state.snapshot.tracks.is_empty() {
-            "No tracks in library"
+        if state.snapshot.tracks.is_empty() && state.snapshot.roots.is_empty() {
+            vec![
+                ListItem::new(Line::from("")),
+                ListItem::new(Line::from(Span::styled(
+                    "No tracks in library",
+                    Style::default().fg(palette.text_muted),
+                ))),
+                ListItem::new(Line::from("")),
+                ListItem::new(Line::from(Span::styled(
+                    "  Add a music folder to get started",
+                    Style::default().fg(palette.text_muted),
+                ))),
+                ListItem::new(Line::from(Span::styled(
+                    "  Press a or : then root add /path",
+                    Style::default().fg(palette.text_muted),
+                ))),
+            ]
+        } else if state.snapshot.tracks.is_empty() {
+            vec![
+                ListItem::new(Line::from("")),
+                ListItem::new(Line::from(Span::styled(
+                    "No tracks in library",
+                    Style::default().fg(palette.text_muted),
+                ))),
+                ListItem::new(Line::from("")),
+                ListItem::new(Line::from(Span::styled(
+                    "  Press : then scan roots to import",
+                    Style::default().fg(palette.text_muted),
+                ))),
+            ]
         } else {
-            "No tracks match current filter"
-        };
-        vec![ListItem::new(Line::from(message))]
+            vec![ListItem::new(Line::from(Span::styled(
+                "No tracks match current filter",
+                Style::default().fg(palette.text_muted),
+            )))]
+        }
     } else {
         state
             .filtered_track_iter()
