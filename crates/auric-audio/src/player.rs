@@ -35,6 +35,12 @@ pub enum PlayerEvent {
     Error { message: String },
 }
 
+impl std::fmt::Debug for PlayerHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlayerHandle").finish_non_exhaustive()
+    }
+}
+
 pub struct PlayerHandle {
     cmd_tx: mpsc::Sender<PlayerCommand>,
     event_rx: Mutex<mpsc::Receiver<PlayerEvent>>,

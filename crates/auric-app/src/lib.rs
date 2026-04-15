@@ -10,9 +10,9 @@ use auric_library::watch::{WatchOptions, WatchSessionSummary, WatchedFolderServi
 use auric_library::{LibraryRoot, TrackRecord};
 use auric_ui::ThemeStore;
 use auric_ui::{
-    render_once_to_text, run_interactive_with_scan, FsThemeStore, IconMode, Palette,
-    PaletteCommandResult, RunOptions, ScanProgress, ShellListItem, ShellSnapshot, ShellState,
-    ShellTrackItem,
+    render_once_to_text, run_interactive_full, FsThemeStore, IconMode, Palette,
+    PaletteCommandResult, PlaybackAction, PlayerEventUpdate, RunOptions, ScanProgress,
+    ShellListItem, ShellSnapshot, ShellState, ShellTrackItem,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -217,6 +217,7 @@ pub struct BootstrappedApp {
     pub feature_registry: FeatureRegistry,
     pub playback_state: PlaybackState,
     pub report: BootstrapReport,
+    pub player: auric_audio::player::PlayerHandle,
 }
 
 pub fn bootstrap_from_config_path(config_path: &Path) -> Result<BootstrappedApp> {
@@ -249,12 +250,15 @@ pub fn bootstrap_from_config_path(config_path: &Path) -> Result<BootstrappedApp>
         ui_icon_pack: config.ui.icon_pack.clone(),
     };
 
+    let player = auric_audio::player::PlayerHandle::spawn();
+
     Ok(BootstrappedApp {
         config,
         db,
         feature_registry,
         playback_state,
         report,
+        player,
     })
 }
 
@@ -541,6 +545,151 @@ fn dispatch_app_command(app: &mut BootstrappedApp, command: AppCommand) -> Resul
     }
 
     Ok(events)
+}
+
+fn handle_tui_playback_action(
+    app: &mut BootstrappedApp,
+    action: PlaybackAction,
+) -> Result<PaletteCommandResult> {
+    match action {
+        PlaybackAction::PlayTrack { track_index } => {
+            let tracks = app.db.list_tracks(10000).unwrap_or_default();
+            let queue: Vec<PlaybackQueueEntry> = tracks
+                .into_iter()
+                .map(|t| PlaybackQueueEntry {
+                    track_id: t.id,
+                    path: t.path,
+                    title: t.title,
+                    artist: t.artist,
+                    album: t.album,
+                    duration_ms: t.duration_ms,
+                    sample_rate: t.sample_rate,
+                    channels: t.channels,
+                    bit_depth: t.bit_depth,
+                })
+                .collect();
+
+            if track_index >= queue.len() {
+                return Ok(PaletteCommandResult::new("No track at that index", false));
+            }
+
+            app.playback_state.queue = queue;
+            app.playback_state.session.current_index = Some(track_index);
+            app.playback_state.session.status = PlaybackStatus::Playing;
+            app.playback_state.session.position_ms = 0;
+
+            let entry = &app.playback_state.queue[track_index];
+            app.player.load(&entry.path);
+
+            let title = entry.title.clone().unwrap_or_default();
+            Ok(PaletteCommandResult::new(
+                format!("Playing: {title}"),
+                true,
+            ))
+        }
+        PlaybackAction::TogglePause => match app.playback_state.session.status {
+            PlaybackStatus::Playing => {
+                app.player.pause();
+                app.playback_state.session.status = PlaybackStatus::Paused;
+                Ok(PaletteCommandResult::new("Paused", true))
+            }
+            PlaybackStatus::Paused => {
+                app.player.resume();
+                app.playback_state.session.status = PlaybackStatus::Playing;
+                Ok(PaletteCommandResult::new("Resumed", true))
+            }
+            PlaybackStatus::Stopped => {
+                if let Some(idx) = app.playback_state.session.current_index {
+                    let entry_path = app.playback_state.queue.get(idx).map(|e| e.path.clone());
+                    let entry_title = app
+                        .playback_state
+                        .queue
+                        .get(idx)
+                        .and_then(|e| e.title.clone());
+                    if let Some(path) = entry_path {
+                        app.player.load(&path);
+                        app.playback_state.session.status = PlaybackStatus::Playing;
+                        let title = entry_title.unwrap_or_default();
+                        return Ok(PaletteCommandResult::new(
+                            format!("Playing: {title}"),
+                            true,
+                        ));
+                    }
+                }
+                Ok(PaletteCommandResult::new("No track to play", false))
+            }
+        },
+        PlaybackAction::Stop => {
+            app.player.stop();
+            app.playback_state.session.status = PlaybackStatus::Stopped;
+            Ok(PaletteCommandResult::new("Stopped", true))
+        }
+        PlaybackAction::Next => {
+            let mut events = Vec::new();
+            handle_playback_transport_command(app, AppCommand::Next, &mut events)?;
+            let status = app.playback_state.session.status;
+            let entry_info = app.playback_state.current_entry().map(|e| {
+                (e.path.clone(), e.title.clone().unwrap_or_default())
+            });
+            if status == PlaybackStatus::Playing || status == PlaybackStatus::Paused {
+                if let Some((path, title)) = entry_info {
+                    app.player.load(&path);
+                    app.playback_state.session.status = PlaybackStatus::Playing;
+                    return Ok(PaletteCommandResult::new(
+                        format!("Playing: {title}"),
+                        true,
+                    ));
+                }
+            }
+            app.player.stop();
+            Ok(PaletteCommandResult::new("End of queue", true))
+        }
+        PlaybackAction::Previous => {
+            let mut events = Vec::new();
+            handle_playback_transport_command(app, AppCommand::Previous, &mut events)?;
+            let status = app.playback_state.session.status;
+            let entry_info = app.playback_state.current_entry().map(|e| {
+                (e.path.clone(), e.title.clone().unwrap_or_default())
+            });
+            if let Some((path, title)) = entry_info {
+                if status == PlaybackStatus::Playing {
+                    app.player.load(&path);
+                }
+                return Ok(PaletteCommandResult::new(
+                    format!("Track: {title}"),
+                    true,
+                ));
+            }
+            Ok(PaletteCommandResult::new("Start of queue", true))
+        }
+        PlaybackAction::VolumeUp => {
+            let new_vol = (app.playback_state.session.volume + 0.05).min(1.0);
+            app.playback_state.session.volume = new_vol;
+            app.player.set_volume(new_vol);
+            Ok(PaletteCommandResult::new(
+                format!("Volume: {}%", (new_vol * 100.0).round() as u32),
+                true,
+            ))
+        }
+        PlaybackAction::VolumeDown => {
+            let new_vol = (app.playback_state.session.volume - 0.05).max(0.0);
+            app.playback_state.session.volume = new_vol;
+            app.player.set_volume(new_vol);
+            Ok(PaletteCommandResult::new(
+                format!("Volume: {}%", (new_vol * 100.0).round() as u32),
+                true,
+            ))
+        }
+        PlaybackAction::ToggleShuffle => {
+            app.playback_state.session.shuffle = !app.playback_state.session.shuffle;
+            let label = if app.playback_state.session.shuffle {
+                "Shuffle: on"
+            } else {
+                "Shuffle: off"
+            };
+            Ok(PaletteCommandResult::new(label, true))
+        }
+    }
 }
 
 fn handle_playback_transport_command(
@@ -1833,7 +1982,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                 let app_ref = app_cell.borrow();
                 app_ref.db.path().unwrap_or(Path::new("")).to_path_buf()
             };
-            run_interactive_with_scan(
+            run_interactive_full(
                 &mut state,
                 &palette,
                 RunOptions {
@@ -1890,6 +2039,55 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                         });
                         rx
                     }
+                },
+                |action: PlaybackAction| {
+                    let mut app_ref = app_cell.borrow_mut();
+                    handle_tui_playback_action(&mut app_ref, action).map_err(|e| {
+                        auric_ui::UiError::Terminal(format!("playback error: {e}"))
+                    })
+                },
+                || {
+                    let app_ref = app_cell.borrow();
+                    let events = app_ref.player.poll_events();
+                    events
+                        .into_iter()
+                        .filter_map(|evt| match evt {
+                            auric_audio::player::PlayerEvent::Position {
+                                position_ms,
+                                duration_ms,
+                            } => Some(PlayerEventUpdate {
+                                position_ms,
+                                duration_ms,
+                                status: "playing".to_string(),
+                                track_finished: false,
+                            }),
+                            auric_audio::player::PlayerEvent::TrackFinished => {
+                                Some(PlayerEventUpdate {
+                                    position_ms: 0,
+                                    duration_ms: 0,
+                                    status: "stopped".to_string(),
+                                    track_finished: true,
+                                })
+                            }
+                            auric_audio::player::PlayerEvent::Paused => {
+                                Some(PlayerEventUpdate {
+                                    position_ms: 0,
+                                    duration_ms: 0,
+                                    status: "paused".to_string(),
+                                    track_finished: false,
+                                })
+                            }
+                            auric_audio::player::PlayerEvent::Stopped => {
+                                Some(PlayerEventUpdate {
+                                    position_ms: 0,
+                                    duration_ms: 0,
+                                    status: "stopped".to_string(),
+                                    track_finished: false,
+                                })
+                            }
+                            _ => None,
+                        })
+                        .collect()
                 },
             )?;
         }
