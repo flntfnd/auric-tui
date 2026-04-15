@@ -721,7 +721,7 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(12), Constraint::Length(6)])
+        .constraints([Constraint::Min(12), Constraint::Length(4)])
         .split(root);
     let main = vertical[0];
     let footer = vertical[1];
@@ -735,30 +735,36 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(7),
+            Constraint::Length(1),  // gap
             Constraint::Length(7),
+            Constraint::Length(1),  // gap
             Constraint::Min(8),
         ])
         .split(cols[0]);
 
     let right_sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(12)])
+        .constraints([
+            Constraint::Length(8),
+            Constraint::Length(1),  // gap
+            Constraint::Min(12),
+        ])
         .split(cols[1]);
 
-    let (_, library_rows_area) = library_panel_inner_areas(right_sections[1]);
+    let (_, library_rows_area) = library_panel_inner_areas(right_sections[2]);
     let areas = RenderAreas {
         roots: PaneArea::bordered(left_sections[0], 1),
-        browse: left_sections[1],
-        playlists: PaneArea::bordered(left_sections[2], 1),
-        tracks: PaneArea::from_list_area(right_sections[1], library_rows_area, 1),
+        browse: left_sections[2],
+        playlists: PaneArea::bordered(left_sections[4], 1),
+        tracks: PaneArea::from_list_area(right_sections[2], library_rows_area, 1),
     };
     state.sync_scroll_offsets(&areas);
 
     render_roots(frame, left_sections[0], state, palette);
-    render_browse_modes(frame, left_sections[1], state, palette);
-    render_playlists(frame, left_sections[2], state, palette);
+    render_browse_modes(frame, left_sections[2], state, palette);
+    render_playlists(frame, left_sections[4], state, palette);
     render_now_playing(frame, right_sections[0], state, palette);
-    render_tracks(frame, right_sections[1], state, palette);
+    render_tracks(frame, right_sections[2], state, palette);
     render_status(frame, footer, state, palette);
 
     if state.show_help {
@@ -798,12 +804,11 @@ fn render_roots(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: 
             .collect()
     };
 
+    let block = pane_block("Library Roots", state.focus == FocusPane::Sources, palette);
+    let content_area = padded_inner(area);
+    frame.render_widget(block, area);
+
     let list = List::new(items)
-        .block(pane_block(
-            "Watched Directories",
-            state.focus == FocusPane::Sources,
-            palette,
-        ))
         .highlight_style(
             Style::default()
                 .bg(palette.selection_bg)
@@ -815,7 +820,7 @@ fn render_roots(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: 
         state.snapshot.roots.len().saturating_sub(1),
     )));
     list_state = list_state.with_offset(state.roots_scroll);
-    frame.render_stateful_widget(list, area, &mut list_state);
+    frame.render_stateful_widget(list, content_area, &mut list_state);
 }
 
 fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
@@ -854,10 +859,12 @@ fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palett
         ]));
     }
 
-    let paragraph = Paragraph::new(lines)
-        .block(pane_block("Browse Library", false, palette))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, area);
+    let block = pane_block("Browse Library", false, palette);
+    let content_area = padded_inner(area);
+    frame.render_widget(block, area);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, content_area);
 }
 
 fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
@@ -878,17 +885,11 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palet
             .collect()
     };
 
+    let block = pane_block("Playlists", state.focus == FocusPane::Inspector, palette);
+    let content_area = padded_inner(area);
+    frame.render_widget(block, area);
+
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Playlists")
-                .border_style(if state.focus == FocusPane::Inspector {
-                    Style::default().fg(palette.focus)
-                } else {
-                    Style::default().fg(palette.border)
-                }),
-        )
         .highlight_style(
             Style::default()
                 .bg(palette.selection_bg)
@@ -899,7 +900,7 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palet
         state.snapshot.playlists.len().saturating_sub(1),
     )));
     list_state = list_state.with_offset(state.playlists_scroll);
-    frame.render_stateful_widget(list, area, &mut list_state);
+    frame.render_stateful_widget(list, content_area, &mut list_state);
 }
 
 fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
@@ -1051,38 +1052,32 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette
         lines.push(Line::from("No track selected"));
     }
 
-    let paragraph = Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .block(pane_block("Now Playing", false, palette));
-    frame.render_widget(paragraph, area);
+    let block = pane_block("Now Playing", false, palette);
+    let content_area = padded_inner(area);
+    frame.render_widget(block, area);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, content_area);
 }
 
 fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
+    let block = pane_block("", false, palette);
+    let content_area = padded_inner(area);
+    frame.render_widget(block, area);
+
     let mut lines = Vec::new();
+    let filter_info = if state.track_filter_query.is_empty() {
+        String::new()
+    } else {
+        format!("  filter: /{}", state.track_filter_query)
+    };
     lines.push(Line::from(vec![
         Span::styled(
             state.snapshot.app_title.clone(),
-            Style::default()
-                .fg(palette.text)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  ", Style::default()),
         Span::styled(
-            format!("focus={:?}", state.focus),
-            Style::default().fg(palette.text_muted),
-        ),
-        Span::styled("  ", Style::default()),
-        Span::styled(
-            format!("mode={}", input_mode_label(state.input_mode)),
-            Style::default().fg(palette.text_muted),
-        ),
-        Span::styled("  ", Style::default()),
-        Span::styled(
-            format!(
-                "tracks={}/{}",
-                state.filtered_track_count(),
-                state.snapshot.tracks.len()
-            ),
+            format!("  {} tracks{filter_info}", state.snapshot.tracks.len()),
             Style::default().fg(palette.text_muted),
         ),
     ]));
@@ -1093,25 +1088,8 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
             .unwrap_or_else(|| default_status_message().to_string()),
         Style::default().fg(palette.text_muted),
     )));
-    if let Some(summary) = state.snapshot.status_lines.first() {
-        lines.push(Line::from(Span::styled(
-            summary.clone(),
-            Style::default().fg(palette.accent_2),
-        )));
-    }
-    lines.push(Line::from(Span::styled(
-        format!(
-            "theme={} icons={} artwork_filter={}",
-            state.snapshot.theme_name,
-            icon_mode_label(state.snapshot.icon_mode),
-            state.snapshot.artwork_filter
-        ),
-        Style::default().fg(palette.text_muted),
-    )));
-    let paragraph = Paragraph::new(lines)
-        .block(pane_block("Status", false, palette))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, area);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, content_area);
 }
 
 fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
@@ -1189,7 +1167,7 @@ fn render_command_palette_overlay(frame: &mut Frame, state: &ShellState, palette
 fn pane_block<'a>(title: &'a str, focused: bool, palette: &Palette) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
-        .title(title)
+        .title(format!(" {title} "))
         .border_style(if focused {
             Style::default().fg(palette.focus)
         } else {
@@ -1358,6 +1336,16 @@ fn inner_rect(area: Rect) -> Rect {
         return Rect::new(area.x, area.y, 0, 0);
     }
     Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2)
+}
+
+fn padded_inner(area: Rect) -> Rect {
+    let inner = inner_rect(area);
+    Rect {
+        x: inner.x.saturating_add(1),
+        y: inner.y,
+        width: inner.width.saturating_sub(2),
+        height: inner.height,
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
