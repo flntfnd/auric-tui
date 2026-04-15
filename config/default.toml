@@ -1,0 +1,65 @@
+# Auric runtime defaults (scaffold)
+
+[features]
+metadata = true
+artwork = true
+remote_metadata = false
+watched_folders = true
+equalizer = false
+visualizer = false
+analytics = false
+p2p_sync = false
+p2p_stream = false
+mouse = true
+image_artwork = true
+
+[playback]
+output_backend = "auto"   # auto | cpal
+buffer_ms = 80
+preload_seconds = 8
+replaygain = "track"      # off | track | album
+exclusive_mode = false
+
+[library]
+auto_scan_on_start = true
+watch_debounce_ms = 750
+read_embedded_artwork = true
+write_tags = true
+scan_batch_size = 2000
+prune_missing_on_scan = false
+
+[ui]
+theme = "auric-dark"
+color_scheme = "dark"      # dark | light
+show_artwork = true
+artwork_display_filter = "none"   # none | pixel-art
+# Display-only filter. Does not modify embedded artwork written to files.
+pixel_art_artwork = false
+# Small pixel size keeps detail for complex covers; lower values cost more CPU on redraw.
+pixel_art_cell_size = 2
+# Reduce redraw cost for heavy terminals: on-change redraws only when art/size changes.
+pixel_art_redraw_policy = "on-change"  # on-change | always
+color_mode = "auto"       # auto | 16 | 256 | truecolor
+refresh_hz = 30
+icon_pack = "nerd-font"   # nerd-font | ascii
+icon_fallback = "ascii"
+# Terminal apps cannot enforce fonts; this is the recommended font for icon support.
+preferred_terminal_font = "FiraCode Nerd Font Mono"
+
+[analytics]
+enabled = false
+storage = "local"         # local | off
+retention_days = 90
+
+[network]
+mode = "off"              # off | sync | stream
+relay = "auto"
+
+[database]
+path = "var/auric.db"
+journal_mode = "wal"      # wal | delete | memory
+synchronous = "normal"    # off | normal | full
+busy_timeout_ms = 5000
+cache_size_kib = 8192
+mmap_size_mb = 64
+wal_autocheckpoint_pages = 1000

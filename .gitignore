@@ -1,0 +1,7 @@
+/target
+.DS_Store
+*.log
+/var
+*.db
+*.db-shm
+*.db-wal

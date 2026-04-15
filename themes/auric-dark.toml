@@ -1,0 +1,34 @@
+name = "auric-dark"
+
+[meta]
+description = "Starter dark theme"
+author = "Auric Contributors"
+variant = "dark"
+
+[colors]
+surface_0 = "#0f1115"
+surface_1 = "#171a21"
+surface_2 = "#202532"
+text = "#e8ecf3"
+text_muted = "#9aa5b5"
+accent = "#4fd1c5"
+accent_2 = "#f6ad55"
+danger = "#fc8181"
+warning = "#f6e05e"
+success = "#68d391"
+border = "#314056"
+focus = "#90cdf4"
+selection_bg = "#2a3446"
+progress_fill = "#4fd1c5"
+visualizer_low = "#63b3ed"
+visualizer_mid = "#4fd1c5"
+visualizer_high = "#f6ad55"
+
+[layout]
+padding_x = 1
+padding_y = 0
+compact_borders = false
+
+[motion]
+reduced_motion = false
+visualizer_fps = 30

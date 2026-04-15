@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/auric-app",
+  "crates/auric-core",
+  "crates/auric-audio",
+  "crates/auric-library",
+  "crates/auric-ui",
+  "crates/auric-net",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+authors = ["Auric Contributors"]
+rust-version = "1.79"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+toml = "0.8"
+tracing = "0.1"
+uuid = { version = "1", features = ["serde", "v4"] }
+walkdir = "2"
+lofty = "0.24.0"
+ratatui = "0.30.0"
+crossterm = "0.29.0"
+notify = "6.1"
+sha2 = "0.10"
+cpal = "0.17.3"
+symphonia = { version = "0.5.5", default-features = false, features = [
+  "aac",
+  "adpcm",
+  "alac",
+  "flac",
+  "isomp4",
+  "mkv",
+  "mp1",
+  "mp2",
+  "mp3",
+  "ogg",
+  "pcm",
+  "vorbis",
+  "wav",
+] }
