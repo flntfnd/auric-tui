@@ -1,6 +1,6 @@
 # Auric
 
-A cross-platform terminal audio player built in Rust. Designed to feel like a serious desktop player compressed into a terminal -- not a file picker with play/pause.
+A cross-platform terminal audio player built in Rust. Designed to feel like a serious desktop player compressed into a terminal, not a file picker with play/pause.
 
 Auric targets high-resolution and lossless playback, capability-aware terminal rendering, and modular features that can be toggled at runtime.
 
@@ -118,7 +118,7 @@ cd auric-tui
 cargo install --path crates/auric-app
 ```
 
-No additional system libraries are needed on Windows -- cpal uses WASAPI which is built into the OS, and SQLite is bundled.
+No additional system libraries are needed on Windows. WASAPI is built into the OS and SQLite is bundled.
 
 The binary installs to `%USERPROFILE%\.cargo\bin\auric.exe`.
 
@@ -320,7 +320,7 @@ journal_mode = "wal"
 
 ## Theming
 
-Themes live in the `themes/` directory as TOML files. Token-based -- no hardcoded values.
+Themes live in the `themes/` directory as TOML files. Token-based, no hardcoded values.
 
 ```toml
 name = "auric-dark"
@@ -378,7 +378,7 @@ Via Symphonia (pure Rust, no system dependencies):
 
 ## Status
 
-Phase 0/1. Local playback, library management, and TUI are functional. Playback engine is wired for device enumeration and format inspection -- stream output is next.
+Phase 0/1. Local playback, library management, and TUI are functional. Playback engine is wired for device enumeration and format inspection. Stream output is next.
 
 See the [Roadmap](docs/ROADMAP.md) for planned phases including metadata enrichment, DSP/visualizer, analytics, and P2P social listening.
 
