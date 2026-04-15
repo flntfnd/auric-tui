@@ -1641,15 +1641,6 @@ fn try_refresh_snapshot(state: &mut ShellState, refresh: &mut Option<&mut Refres
     }
 }
 
-fn input_mode_label(mode: InputMode) -> &'static str {
-    match mode {
-        InputMode::Normal => "normal",
-        InputMode::TrackFilter => "track-filter",
-        InputMode::CommandPalette => "command",
-        InputMode::AddMusic => "add-music",
-        InputMode::Welcome => "welcome",
-    }
-}
 
 fn shift_index(current: usize, len: usize, delta: isize) -> usize {
     if len == 0 {
@@ -1721,13 +1712,6 @@ fn icon_glyph(mode: IconMode, token: IconToken) -> &'static str {
     }
 }
 
-fn icon_mode_label(mode: IconMode) -> &'static str {
-    match mode {
-        IconMode::NerdFont => "nerd-font",
-        IconMode::Ascii => "ascii",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1779,7 +1763,7 @@ mod tests {
     fn renders_shell_snapshot_to_text() {
         let mut state = sample_state();
         let text = render_once_to_text(&mut state, &Palette::default(), 100, 30).unwrap();
-        assert!(text.contains("Watched Directories"));
+        assert!(text.contains("Library Roots"));
         assert!(text.contains("Library"));
         assert!(text.contains("Favorites"));
         assert!(text.contains("Track One"));
