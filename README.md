@@ -198,17 +198,98 @@ Commands:
 
 ## Keyboard shortcuts
 
+### Playback
+
 | Key | Action |
 |-----|--------|
-| `Tab` / `Shift-Tab` | Cycle focus between panes |
-| `j` / `k` or Up / Down | Move selection |
-| `g` / `G` | Jump to top / bottom |
 | `Space` | Play / pause |
+| `s` | Stop |
+| `]` | Next track |
+| `[` | Previous track |
+| `.` | Seek forward (5s) |
+| `,` | Seek backward (5s) |
+| `>` | Seek forward (30s) |
+| `<` | Seek backward (30s) |
+| `S` | Toggle shuffle |
+| `R` | Cycle repeat mode (off / one / all) |
+
+### Volume
+
+| Key | Action |
+|-----|--------|
+| `=` / `+` | Volume up |
+| `-` | Volume down |
+| `m` | Mute / unmute |
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` or Up / Down | Move selection |
+| `h` / `l` or Left / Right | Collapse / expand or switch pane context |
+| `g` | Jump to top |
+| `G` | Jump to bottom |
+| `Page Up` / `Page Down` | Scroll by page |
+| `Tab` / `Shift-Tab` | Cycle focus between panes |
+| `1` | Focus library pane |
+| `2` | Focus tracks pane |
+| `3` | Focus now playing pane |
+| `Enter` | Play selected track / open selected item |
+
+### Search and command palette
+
+| Key | Action |
+|-----|--------|
 | `/` | Search / filter tracks |
-| `:` | Open command palette |
+| `:` or `Ctrl-p` | Open command palette |
+| `Esc` | Close search / palette / overlay |
+| `Enter` | Submit search or execute command |
+| `Ctrl-u` | Clear input line |
+
+### Queue
+
+| Key | Action |
+|-----|--------|
+| `a` | Add selected track to queue |
+| `A` | Add selected track as next in queue |
+| `Ctrl-d` | Remove selected track from queue |
+| `Ctrl-x` | Clear entire queue |
+
+### Library
+
+| Key | Action |
+|-----|--------|
+| `i` | Show track info / metadata |
+| `I` | Identify untagged tracks (when remote metadata enabled) |
+| `r` | Rescan / refresh current context |
+| `Ctrl-r` | Rescan all library roots |
+
+### Playlist
+
+| Key | Action |
+|-----|--------|
+| `p` | Add selected track to playlist |
+| `P` | Create new playlist |
+| `d` | Remove selected item (with confirmation) |
+
+### View
+
+| Key | Action |
+|-----|--------|
+| `v` | Toggle visualizer |
+| `e` | Toggle equalizer panel |
+| `n` | Expand / collapse now playing panel |
 | `?` | Toggle help overlay |
-| `Esc` | Close overlay / exit filter |
-| `q` / `Ctrl-c` | Quit |
+| `t` | Cycle through themes |
+| `F` | Toggle fullscreen focus on current pane |
+
+### General
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit (closes modal first if one is open) |
+| `Ctrl-c` | Force quit |
+| `Ctrl-z` | Suspend to background |
 
 ## Configuration
 
