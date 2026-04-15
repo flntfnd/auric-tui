@@ -258,6 +258,29 @@ impl ShellState {
                 ));
                 self.input_mode = InputMode::AddMusic;
             }
+            KeyCode::Enter if self.focus == FocusPane::Tracks => {
+                return KeyAction::Playback(PlaybackAction::PlayTrack {
+                    track_index: self.selected_track,
+                });
+            }
+            KeyCode::Char(' ') => {
+                return KeyAction::Playback(PlaybackAction::TogglePause);
+            }
+            KeyCode::Char('n') => {
+                return KeyAction::Playback(PlaybackAction::Next);
+            }
+            KeyCode::Char('N') => {
+                return KeyAction::Playback(PlaybackAction::Previous);
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                return KeyAction::Playback(PlaybackAction::VolumeUp);
+            }
+            KeyCode::Char('-') => {
+                return KeyAction::Playback(PlaybackAction::VolumeDown);
+            }
+            KeyCode::Char('s') => {
+                return KeyAction::Playback(PlaybackAction::ToggleShuffle);
+            }
             _ => {}
         }
         KeyAction::Continue
@@ -559,12 +582,25 @@ enum InputMode {
     Welcome,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum KeyAction {
     Continue,
     Quit,
     RefreshRequested,
     CommandSubmitted(String),
+    Playback(PlaybackAction),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlaybackAction {
+    PlayTrack { track_index: usize },
+    TogglePause,
+    Stop,
+    Next,
+    Previous,
+    VolumeUp,
+    VolumeDown,
+    ToggleShuffle,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -596,6 +632,14 @@ pub enum ScanProgress {
     Done { message: String },
     /// Scan failed.
     Error { message: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerEventUpdate {
+    pub position_ms: u64,
+    pub duration_ms: u64,
+    pub status: String,
+    pub track_finished: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -740,6 +784,9 @@ where
     )
 }
 
+type PlaybackActionFn<'a> = dyn FnMut(PlaybackAction) -> Result<PaletteCommandResult, UiError> + 'a;
+type PlayerPollFn<'a> = dyn FnMut() -> Vec<PlayerEventUpdate> + 'a;
+
 fn run_interactive_with_optional_handlers(
     state: &mut ShellState,
     palette: &Palette,
@@ -747,6 +794,57 @@ fn run_interactive_with_optional_handlers(
     refresh: Option<&mut RefreshSnapshotFn<'_>>,
     command_handler: Option<&mut CommandPaletteFn<'_>>,
     scan_handler: Option<&mut BackgroundScanFn<'_>>,
+) -> Result<(), UiError> {
+    run_interactive_full_inner(
+        state,
+        palette,
+        options,
+        refresh,
+        command_handler,
+        scan_handler,
+        None,
+        None,
+    )
+}
+
+pub fn run_interactive_full<FRefresh, FCommand, FScan, FPlayback, FPlayerPoll>(
+    state: &mut ShellState,
+    palette: &Palette,
+    options: RunOptions,
+    mut refresh: FRefresh,
+    mut command_handler: FCommand,
+    mut scan_handler: FScan,
+    mut playback_handler: FPlayback,
+    mut player_poll: FPlayerPoll,
+) -> Result<(), UiError>
+where
+    FRefresh: FnMut() -> Result<ShellSnapshot, UiError>,
+    FCommand: FnMut(&str) -> Result<PaletteCommandResult, UiError>,
+    FScan: FnMut(String) -> std::sync::mpsc::Receiver<ScanProgress>,
+    FPlayback: FnMut(PlaybackAction) -> Result<PaletteCommandResult, UiError>,
+    FPlayerPoll: FnMut() -> Vec<PlayerEventUpdate>,
+{
+    run_interactive_full_inner(
+        state,
+        palette,
+        options,
+        Some(&mut refresh),
+        Some(&mut command_handler),
+        Some(&mut scan_handler),
+        Some(&mut playback_handler),
+        Some(&mut player_poll),
+    )
+}
+
+fn run_interactive_full_inner(
+    state: &mut ShellState,
+    palette: &Palette,
+    options: RunOptions,
+    refresh: Option<&mut RefreshSnapshotFn<'_>>,
+    command_handler: Option<&mut CommandPaletteFn<'_>>,
+    scan_handler: Option<&mut BackgroundScanFn<'_>>,
+    playback_handler: Option<&mut PlaybackActionFn<'_>>,
+    player_poll: Option<&mut PlayerPollFn<'_>>,
 ) -> Result<(), UiError> {
     enable_raw_mode().map_err(|e| UiError::Terminal(format!("enable_raw_mode failed: {e}")))?;
     let mut stdout = io::stdout();
@@ -771,6 +869,8 @@ fn run_interactive_with_optional_handlers(
         refresh,
         command_handler,
         scan_handler,
+        playback_handler,
+        player_poll,
     );
 
     let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
@@ -792,6 +892,8 @@ fn run_loop(
     mut refresh: Option<&mut RefreshSnapshotFn<'_>>,
     mut command_handler: Option<&mut CommandPaletteFn<'_>>,
     mut scan_handler: Option<&mut BackgroundScanFn<'_>>,
+    mut playback_handler: Option<&mut PlaybackActionFn<'_>>,
+    mut player_poll: Option<&mut PlayerPollFn<'_>>,
 ) -> Result<(), UiError> {
     use std::sync::mpsc;
 
@@ -852,6 +954,30 @@ fn run_loop(
             }
         }
 
+        // Poll player events
+        if let Some(poll_fn) = player_poll.as_mut() {
+            for update in (*poll_fn)() {
+                if !update.status.is_empty() {
+                    state.playback_status = update.status;
+                }
+                if update.position_ms > 0 || update.duration_ms > 0 {
+                    state.playback_position_ms = update.position_ms;
+                    state.playback_duration_ms = update.duration_ms;
+                }
+                if update.track_finished {
+                    // Auto-advance to next track
+                    if let Some(handler) = playback_handler.as_mut() {
+                        if let Ok(result) = (*handler)(PlaybackAction::Next) {
+                            state.status_message = Some(result.status_message);
+                            if result.refresh_requested {
+                                try_refresh_snapshot(state, &mut refresh);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         terminal
             .draw(|f| {
                 last_areas = draw_shell(f, state, palette);
@@ -888,6 +1014,22 @@ fn run_loop(
                             state.status_message = Some(format!(
                                 "Command palette unavailable in this shell mode: {command}"
                             ));
+                        }
+                    }
+                    KeyAction::Playback(action) => {
+                        if let Some(handler) = playback_handler.as_mut() {
+                            match (*handler)(action) {
+                                Ok(result) => {
+                                    state.status_message = Some(result.status_message);
+                                    if result.refresh_requested {
+                                        try_refresh_snapshot(state, &mut refresh);
+                                    }
+                                }
+                                Err(err) => {
+                                    state.status_message =
+                                        Some(format!("Playback error: {err}"));
+                                }
+                            }
                         }
                     }
                 },
@@ -1309,68 +1451,120 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
 }
 
 fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
-    let selected = state.selected_track_item();
-    let mut lines = vec![Line::from(vec![
-        Span::styled(
-            format!(
-                "{} ",
-                icon_glyph(state.snapshot.icon_mode, IconToken::NowPlaying)
-            ),
-            Style::default().fg(palette.progress_fill),
-        ),
-        Span::styled("Now Playing / Controls", Style::default().fg(palette.text)),
-    ])];
-
-    if let Some(track) = selected {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "{}  {}  {}",
-                track.title,
-                icon_glyph(state.snapshot.icon_mode, IconToken::NowPlaying),
-                track.artist
-            ),
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(Span::styled(
-            "[Space] Play/Pause   [N] Next   [B] Prev   [/] Filter   [:] Commands",
-            Style::default().fg(palette.text_muted),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!(
-                "Album: {}   Quality: {}   Time: {}",
-                track.album,
-                format_tech_compact(track.sample_rate, track.bit_depth, track.channels),
-                format_duration_short(track.duration_ms)
-            ),
-            Style::default().fg(palette.text_muted),
-        )));
-        lines.push(Line::from(Span::styled(
-            fake_progress_bar(area.width.saturating_sub(6), 0.32),
-            Style::default().fg(palette.progress_fill),
-        )));
-        lines.push(Line::from(Span::styled(
-            fake_visualizer_line(area.width.saturating_sub(6)),
-            Style::default().fg(palette.accent_2),
-        )));
-        if state.snapshot.pixel_art_enabled {
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "pixel-art on (cell {}px)",
-                    state.snapshot.pixel_art_cell_size
-                ),
-                Style::default().fg(palette.warning),
-            )));
-        }
-    } else {
-        lines.push(Line::from("No track selected"));
-    }
-
     let block = pane_block("Now Playing", false, palette);
     let content_area = padded_inner(area);
     frame.render_widget(block, area);
 
+    let mut lines = Vec::new();
+    let is_playing = state.playback_status == "playing";
+    let is_paused = state.playback_status == "paused";
+    let has_track = !state.snapshot.now_playing_title.is_empty();
+
+    if has_track {
+        let status_icon = if is_playing {
+            ">"
+        } else if is_paused {
+            "||"
+        } else {
+            "[]"
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{status_icon} "),
+                Style::default().fg(if is_playing {
+                    palette.progress_fill
+                } else {
+                    palette.text_muted
+                }),
+            ),
+            Span::styled(
+                &state.snapshot.now_playing_title,
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    "  {}  {}",
+                    state.snapshot.now_playing_artist, state.snapshot.now_playing_album
+                ),
+                Style::default().fg(palette.text_muted),
+            ),
+        ]));
+
+        let position = state.playback_position_ms;
+        let duration = state.playback_duration_ms;
+        let progress = if duration > 0 {
+            position as f32 / duration as f32
+        } else {
+            0.0
+        };
+
+        let bar_width = content_area.width.saturating_sub(2);
+        lines.push(Line::from(Span::styled(
+            progress_bar(bar_width, progress),
+            Style::default().fg(palette.progress_fill),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}  /  {}", format_ms(position), format_ms(duration)),
+                Style::default().fg(palette.text_muted),
+            ),
+            Span::styled(
+                format!(
+                    "   vol: {}%  {}  {}  {}/{}",
+                    (state.snapshot.volume * 100.0).round() as u32,
+                    if state.snapshot.shuffle {
+                        "shuffle"
+                    } else {
+                        ""
+                    },
+                    match state.snapshot.repeat_mode.as_str() {
+                        "one" => "repeat:1",
+                        "all" => "repeat:all",
+                        _ => "",
+                    },
+                    state.snapshot.queue_position,
+                    state.snapshot.queue_length,
+                ),
+                Style::default().fg(palette.text_muted),
+            ),
+        ]));
+    } else if let Some(track) = state.selected_track_item() {
+        lines.push(Line::from(Span::styled(
+            format!("{} - {}", track.title, track.artist),
+            Style::default().fg(palette.text_muted),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Press Enter to play",
+            Style::default().fg(palette.text_muted),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "No track selected",
+            Style::default().fg(palette.text_muted),
+        )));
+    }
+
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(paragraph, content_area);
+}
+
+fn format_ms(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    let minutes = total_secs / 60;
+    let seconds = total_secs % 60;
+    format!("{minutes:02}:{seconds:02}")
+}
+
+fn progress_bar(width: u16, progress: f32) -> String {
+    let usable = usize::from(width.max(10)).saturating_sub(2);
+    let filled = ((usable as f32) * progress.clamp(0.0, 1.0)).round() as usize;
+    let mut body = String::with_capacity(usable);
+    for idx in 0..usable {
+        body.push(if idx < filled { '█' } else { '░' });
+    }
+    format!("[{body}]")
 }
 
 fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
@@ -1425,6 +1619,11 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from("Tab / Shift-Tab: switch pane focus"),
+        Line::from("Enter: play selected track"),
+        Line::from("Space: play/pause"),
+        Line::from("n / N: next / previous track"),
+        Line::from("+ / -: volume up / down"),
+        Line::from("s: toggle shuffle"),
         Line::from("a: add music folder"),
         Line::from("j/k or arrows: move selection"),
         Line::from("PgUp/PgDn: page movement"),
@@ -1708,37 +1907,8 @@ fn format_tech_compact(
     }
 }
 
-fn fake_progress_bar(width: u16, progress: f32) -> String {
-    let usable = usize::from(width.max(10)).saturating_sub(2);
-    let filled = ((usable as f32) * progress.clamp(0.0, 1.0)).round() as usize;
-    let mut body = String::with_capacity(usable);
-    for idx in 0..usable {
-        body.push(if idx < filled { '█' } else { '░' });
-    }
-    format!("[{body}]")
-}
-
-fn fake_visualizer_line(width: u16) -> String {
-    let usable = usize::from(width.max(12)).saturating_sub(2);
-    let pattern = [1usize, 4, 2, 6, 3, 7, 2, 5, 1, 4, 2, 3];
-    let mut out = String::with_capacity(usable);
-    for i in 0..usable {
-        let amp = pattern[i % pattern.len()];
-        out.push(match amp {
-            0 | 1 => '▁',
-            2 => '▂',
-            3 => '▃',
-            4 => '▄',
-            5 => '▅',
-            6 => '▆',
-            _ => '▇',
-        });
-    }
-    out
-}
-
 fn default_status_message() -> &'static str {
-    "Tab: panes  a: add music  /: filter  :: commands  ?: help  q: quit"
+    "Enter: play  Space: pause  n/N: next/prev  +/-: volume  a: add music  ?: help"
 }
 
 fn track_matches_query(track: &ShellTrackItem, query: &str) -> bool {
