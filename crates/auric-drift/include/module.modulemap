@@ -1,0 +1,4 @@
+module AuricDriftFFI {
+    header "auric_drift.h"
+    export *
+}

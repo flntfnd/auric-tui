@@ -4,6 +4,7 @@ members = [
   "crates/auric-app",
   "crates/auric-core",
   "crates/auric-audio",
+  "crates/auric-drift",
   "crates/auric-library",
   "crates/auric-ui",
   "crates/auric-net",
@@ -27,7 +28,7 @@ toml = "0.8"
 tracing = "0.1"
 uuid = { version = "1", features = ["serde", "v4"] }
 walkdir = "2"
-auric-drift = { path = "../auric/auric-drift", features = ["serde"] }
+auric-drift = { path = "crates/auric-drift", features = ["serde"] }
 lofty = "0.24.0"
 ratatui = "0.30.0"
 crossterm = "0.29.0"

@@ -123,6 +123,7 @@ dependencies = [
  "rustfft",
  "serde",
  "symphonia",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

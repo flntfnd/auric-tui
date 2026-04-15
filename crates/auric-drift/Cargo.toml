@@ -1,0 +1,28 @@
+[package]
+name = "auric-drift"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Auric Drift intelligent shuffle algorithm and audio feature analyzer"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+rayon = "1"
+rustfft = "6"
+symphonia = { version = "0.5.5", default-features = false, features = [
+    "aac", "adpcm", "alac", "flac", "isomp4", "mkv",
+    "mp1", "mp2", "mp3", "ogg", "pcm", "vorbis", "wav",
+] }
+rand = "0.9"
+thiserror = "2"
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+ffi = []
+
+[dev-dependencies]
+tempfile = "3"
