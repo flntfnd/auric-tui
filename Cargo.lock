@@ -213,6 +213,7 @@ dependencies = [
  "image",
  "ratatui",
  "ratatui-image",
+ "rustfft",
  "serde",
  "tachyonfx",
  "tempfile",

@@ -82,7 +82,7 @@ fn set_dot(dots: &mut [u8], dot_cols: usize, px: usize, py: usize) {
     let cy = py / 4;
     let dx = px % 2;
     let dy = py % 4;
-    let idx = cy * ((dot_cols + 1) / 2) + cx;
+    let idx = cy * dot_cols.div_ceil(2) + cx;
     if idx < dots.len() {
         dots[idx] |= DOT_MAP[dx][dy];
     }
@@ -213,7 +213,7 @@ fn render_mirror(area: Rect, buf: &mut Buffer, bands: &[f32], palette: &Palette)
             }
             // Up from center
             for dr in 0..fill {
-                if center >= dr + 1 {
+                if center > dr {
                     set_dot(&mut dots, dot_cols, col, center - 1 - dr);
                 }
             }
@@ -381,15 +381,15 @@ pub fn analyze_spectrum(samples: &[f32], num_bands: usize) -> Vec<f32> {
     }
 
     let fft_size = 1024;
-    let n = samples.len().min(fft_size);
 
-    let mut buffer: Vec<Complex<f32>> = Vec::with_capacity(fft_size);
-    for i in 0..fft_size {
-        let sample = if i < n { samples[i] } else { 0.0 };
-        let window =
-            0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos());
-        buffer.push(Complex::new(sample * window, 0.0));
-    }
+    let mut buffer: Vec<Complex<f32>> = (0..fft_size)
+        .map(|i| {
+            let sample = samples.get(i).copied().unwrap_or(0.0);
+            let window =
+                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos());
+            Complex::new(sample * window, 0.0)
+        })
+        .collect();
 
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(fft_size);
@@ -411,12 +411,9 @@ pub fn analyze_spectrum(samples: &[f32], num_bands: usize) -> Vec<f32> {
             .min(magnitudes.len())
             .max(bin_lo + 1);
 
-        let mut sum = 0.0f32;
-        let mut count = 0;
-        for bin in bin_lo..bin_hi.min(magnitudes.len()) {
-            sum += magnitudes[bin];
-            count += 1;
-        }
+        let slice = &magnitudes[bin_lo..bin_hi.min(magnitudes.len())];
+        let sum: f32 = slice.iter().sum();
+        let count = slice.len();
         if count > 0 {
             *band_val = (sum / count as f32 * 12.0).clamp(0.0, 1.0);
         }

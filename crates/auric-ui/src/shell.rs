@@ -1884,8 +1884,7 @@ fn render_browse_items(frame: &mut Frame, area: Rect, state: &mut ShellState, pa
         .browse
         .items
         .iter()
-        .enumerate()
-        .map(|(_i, item)| {
+        .map(|item| {
             let is_active = state.browse.selected_item.as_deref() == Some(item.as_str());
             let style = if is_active {
                 base_style.fg(palette.focus).add_modifier(Modifier::BOLD)

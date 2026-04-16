@@ -212,10 +212,10 @@ fn compute_spectral_centroid(samples: &[f32], sample_rate: f32) -> f32 {
         let magnitudes = compute_fft_magnitudes(&samples[offset..offset + FFT_SIZE], &window);
         let mut weighted_sum = 0.0f64;
         let mut mag_sum = 0.0f64;
-        for bin in 1..half_fft {
-            let freq = bin as f64 * bin_width as f64;
-            weighted_sum += freq * magnitudes[bin] as f64;
-            mag_sum += magnitudes[bin] as f64;
+        for (bin, &mag) in magnitudes[1..half_fft].iter().enumerate() {
+            let freq = (bin + 1) as f64 * bin_width as f64;
+            weighted_sum += freq * mag as f64;
+            mag_sum += mag as f64;
         }
         if mag_sum > 1e-10 {
             centroid_sum += weighted_sum / mag_sum;
@@ -289,12 +289,12 @@ fn detect_key(samples: &[f32], sample_rate: f32) -> i32 {
     let mut offset = 0;
     while offset + FFT_SIZE <= samples.len() {
         let magnitudes = compute_fft_magnitudes(&samples[offset..offset + FFT_SIZE], &window);
-        for bin in 1..half_fft {
-            let freq = bin as f32 * bin_width;
-            if freq < 65.0 || freq > 2000.0 { continue; }
+        for (bin, &mag) in magnitudes[1..half_fft].iter().enumerate() {
+            let freq = (bin + 1) as f32 * bin_width;
+            if !(65.0..=2000.0).contains(&freq) { continue; }
             let note_num = 12.0 * (freq / 440.0).log2() + 69.0;
             let pitch_class = (note_num.round() as i32).rem_euclid(12) as usize;
-            chromagram[pitch_class] += magnitudes[bin] as f64;
+            chromagram[pitch_class] += mag as f64;
         }
         frame_count += 1;
         offset += HOP_SIZE * 4;

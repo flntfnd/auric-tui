@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 const GITHUB_REPO: &str = "flntfnd/auric-tui";
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
+#[derive(Default)]
 pub struct UpdateChecker {
     latest_version: Option<String>,
     last_check: Option<Instant>,

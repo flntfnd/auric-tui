@@ -39,7 +39,7 @@ const KEY_NAMES: [&str; 24] = [
 
 impl CamelotWheel {
     pub fn compatibility(from: i32, to: i32) -> f32 {
-        if from < 0 || from >= 24 || to < 0 || to >= 24 {
+        if !(0..24).contains(&from) || !(0..24).contains(&to) {
             return 0.5;
         }
         if from == to {
