@@ -696,6 +696,14 @@ fn handle_tui_playback_action(
             };
             Ok(PaletteCommandResult::new(label, true))
         }
+        PlaybackAction::Seek { position_ms } => {
+            app.playback_state.session.position_ms = position_ms;
+            let secs = position_ms / 1000;
+            Ok(PaletteCommandResult::new(
+                format!("Seek: {:02}:{:02}", secs / 60, secs % 60),
+                true,
+            ))
+        }
     }
 }
 

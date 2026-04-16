@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 pub mod browse;
 pub mod file_browser;
+pub mod seekbar;
 pub mod shell;
 pub mod terminal_caps;
 pub mod theme;

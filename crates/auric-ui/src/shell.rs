@@ -139,6 +139,7 @@ pub struct ShellState {
     pub playback_position_ms: u64,
     pub playback_duration_ms: u64,
     pub playback_status: String,
+    pub seek_bar_area: Rect,
     pub browse: crate::browse::BrowseState,
     browse_filter_artist: Option<String>,
     browse_filter_album: Option<String>,
@@ -170,6 +171,7 @@ impl ShellState {
             playback_position_ms: 0,
             playback_duration_ms: 0,
             playback_status: "stopped".to_string(),
+            seek_bar_area: Rect::default(),
             browse: crate::browse::BrowseState::new(),
             browse_filter_artist: None,
             browse_filter_album: None,
@@ -354,6 +356,17 @@ impl ShellState {
             MouseEventKind::Down(_) => {
                 let x = mouse.column;
                 let y = mouse.row;
+                // Check if clicking on the seek bar
+                if self.seek_bar_area != Rect::default() && self.seek_bar_area.contains((x, y).into()) {
+                    let elapsed_width = 5u16; // "MM:SS" is 5 chars
+                    let remaining_width = 5u16;
+                    if let Some(progress) = crate::seekbar::click_to_progress(
+                        x, self.seek_bar_area, elapsed_width, remaining_width,
+                    ) {
+                        let position_ms = (progress as f64 * self.playback_duration_ms as f64) as u64;
+                        return KeyAction::Playback(PlaybackAction::Seek { position_ms });
+                    }
+                }
                 // Check if clicking on track list header for sorting
                 if areas.track_header.contains((x, y).into()) {
                     let co = &areas.track_col_offsets;
@@ -847,6 +860,7 @@ pub enum PlaybackAction {
     VolumeUp,
     VolumeDown,
     ToggleShuffle,
+    Seek { position_ms: u64 },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1807,12 +1821,11 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
     offsets
 }
 
-fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
+fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
     let block = pane_block("Now Playing", false, palette);
     let content_area = padded_inner(area);
     frame.render_widget(block, area);
 
-    let mut lines = Vec::new();
     let is_playing = state.playback_status == "playing";
     let is_paused = state.playback_status == "paused";
     let has_track = !state.snapshot.now_playing_title.is_empty();
@@ -1825,7 +1838,9 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette
         } else {
             "[]"
         };
-        lines.push(Line::from(vec![
+
+        // Row 0: status icon + title + artist/album
+        let title_line = Line::from(vec![
             Span::styled(
                 format!("{status_icon} "),
                 Style::default().fg(if is_playing {
@@ -1835,7 +1850,7 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette
                 }),
             ),
             Span::styled(
-                &state.snapshot.now_playing_title,
+                state.snapshot.now_playing_title.clone(),
                 Style::default()
                     .fg(palette.text)
                     .add_modifier(Modifier::BOLD),
@@ -1847,8 +1862,16 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette
                 ),
                 Style::default().fg(palette.text_muted),
             ),
-        ]));
+        ]);
+        let title_area = Rect {
+            x: content_area.x,
+            y: content_area.y,
+            width: content_area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(title_line), title_area);
 
+        // Row 1: seek bar
         let position = state.playback_position_ms;
         let duration = state.playback_duration_ms;
         let progress = if duration > 0 {
@@ -1856,26 +1879,34 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette
         } else {
             0.0
         };
+        let elapsed_str = format_ms(position);
+        let remaining_ms = duration.saturating_sub(position);
+        let remaining_str = format_ms(remaining_ms);
 
-        let bar_width = content_area.width.saturating_sub(2);
-        lines.push(Line::from(Span::styled(
-            progress_bar(bar_width, progress),
-            Style::default().fg(palette.progress_fill),
-        )));
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{}  /  {}", format_ms(position), format_ms(duration)),
-                Style::default().fg(palette.text_muted),
-            ),
+        let seek_bar_rect = Rect {
+            x: content_area.x,
+            y: content_area.y + 1,
+            width: content_area.width,
+            height: 1,
+        };
+        state.seek_bar_area = seek_bar_rect;
+        frame.render_widget(
+            crate::seekbar::SeekBar {
+                progress,
+                elapsed: &elapsed_str,
+                remaining: &remaining_str,
+                palette,
+            },
+            seek_bar_rect,
+        );
+
+        // Row 2: transport info
+        let info_line = Line::from(vec![
             Span::styled(
                 format!(
-                    "   vol: {}%  {}  {}  {}/{}",
+                    "vol: {}%  {}  {}  {}/{}",
                     (state.snapshot.volume * 100.0).round() as u32,
-                    if state.snapshot.shuffle {
-                        "shuffle"
-                    } else {
-                        ""
-                    },
+                    if state.snapshot.shuffle { "shuffle" } else { "" },
                     match state.snapshot.repeat_mode.as_str() {
                         "one" => "repeat:1",
                         "all" => "repeat:all",
@@ -1886,25 +1917,37 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette
                 ),
                 Style::default().fg(palette.text_muted),
             ),
-        ]));
-    } else if let Some(track) = state.selected_track_item() {
-        lines.push(Line::from(Span::styled(
-            format!("{} - {}", track.title, track.artist),
-            Style::default().fg(palette.text_muted),
-        )));
-        lines.push(Line::from(Span::styled(
-            "Press Enter to play",
-            Style::default().fg(palette.text_muted),
-        )));
+        ]);
+        let info_area = Rect {
+            x: content_area.x,
+            y: content_area.y + 2,
+            width: content_area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(info_line), info_area);
     } else {
-        lines.push(Line::from(Span::styled(
-            "No track selected",
-            Style::default().fg(palette.text_muted),
-        )));
-    }
+        // Reset seek bar area when no track is playing
+        state.seek_bar_area = Rect::default();
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, content_area);
+        let mut lines = Vec::new();
+        if let Some(track) = state.selected_track_item() {
+            lines.push(Line::from(Span::styled(
+                format!("{} - {}", track.title, track.artist),
+                Style::default().fg(palette.text_muted),
+            )));
+            lines.push(Line::from(Span::styled(
+                "Press Enter to play",
+                Style::default().fg(palette.text_muted),
+            )));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "No track selected",
+                Style::default().fg(palette.text_muted),
+            )));
+        }
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, content_area);
+    }
 }
 
 fn format_ms(ms: u64) -> String {
@@ -1914,15 +1957,6 @@ fn format_ms(ms: u64) -> String {
     format!("{minutes:02}:{seconds:02}")
 }
 
-fn progress_bar(width: u16, progress: f32) -> String {
-    let usable = usize::from(width.max(10)).saturating_sub(2);
-    let filled = ((usable as f32) * progress.clamp(0.0, 1.0)).round() as usize;
-    let mut body = String::with_capacity(usable);
-    for idx in 0..usable {
-        body.push(if idx < filled { '█' } else { '░' });
-    }
-    format!("[{body}]")
-}
 
 fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
     let block = pane_block("", false, palette);
