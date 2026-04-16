@@ -1,0 +1,14 @@
+{
+    "version": "0.1.0",
+    "description": "Cross-platform terminal audio player built in Rust",
+    "homepage": "https://github.com/flntfnd/auric-tui",
+    "license": "MIT|Apache-2.0",
+    "url": "https://github.com/flntfnd/auric-tui/releases/download/v0.1.0/auric-x86_64-pc-windows-msvc.zip",
+    "bin": "auric.exe",
+    "checkver": {
+        "github": "https://github.com/flntfnd/auric-tui"
+    },
+    "autoupdate": {
+        "url": "https://github.com/flntfnd/auric-tui/releases/download/v$version/auric-x86_64-pc-windows-msvc.zip"
+    }
+}

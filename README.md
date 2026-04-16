@@ -130,6 +130,42 @@ The binary is at `target/release/auric` (or `target\release\auric.exe` on Window
 
 Pre-built binaries are available on the [Releases](https://github.com/flntfnd/auric-tui/releases) page.
 
+### Package managers
+
+**Homebrew (macOS / Linux):**
+
+```sh
+brew tap flntfnd/auric
+brew install auric
+```
+
+**AUR (Arch Linux):**
+
+```sh
+yay -S auric
+```
+
+or `paru -S auric`
+
+**Scoop (Windows):**
+
+```powershell
+scoop bucket add auric https://github.com/flntfnd/auric-tui
+scoop install auric
+```
+
+**Nix:**
+
+```sh
+nix run github:flntfnd/auric-tui
+```
+
+**Cargo (any platform):**
+
+```sh
+cargo install --git https://github.com/flntfnd/auric-tui.git -p auric-app
+```
+
 ## Quick start
 
 ```sh

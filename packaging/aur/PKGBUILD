@@ -1,0 +1,24 @@
+# Maintainer: flntfnd
+pkgname=auric
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Cross-platform terminal audio player built in Rust"
+arch=('x86_64')
+url="https://github.com/flntfnd/auric-tui"
+license=('MIT' 'Apache-2.0')
+depends=('alsa-lib')
+makedepends=('rust' 'cargo' 'pkg-config')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/flntfnd/auric-tui/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "auric-tui-$pkgver"
+    cargo build --release --locked -p auric-app
+}
+
+package() {
+    cd "auric-tui-$pkgver"
+    install -Dm755 "target/release/auric" "$pkgdir/usr/bin/auric"
+    install -Dm644 "LICENSE-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT" || true
+    install -Dm644 "LICENSE-APACHE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE" || true
+}
