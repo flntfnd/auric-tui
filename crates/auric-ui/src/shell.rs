@@ -272,6 +272,15 @@ impl ShellState {
         }
 
         match self.input_mode {
+            InputMode::TrackInfo => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('i') | KeyCode::Char('q') => {
+                        self.input_mode = InputMode::Normal;
+                    }
+                    _ => {}
+                }
+                return KeyAction::Continue;
+            }
             InputMode::TrackFilter => return self.handle_filter_key(key),
             InputMode::CommandPalette => return self.handle_command_palette_key(key),
             InputMode::AddMusic | InputMode::Welcome => return self.handle_add_music_key(key),
@@ -341,6 +350,11 @@ impl ShellState {
                     self.sort_column.label(),
                     if self.sort_ascending { "▲" } else { "▼" }
                 ));
+            }
+            KeyCode::Char('i') if self.focus == FocusPane::Tracks => {
+                if self.selected_track_item().is_some() {
+                    self.input_mode = InputMode::TrackInfo;
+                }
             }
             _ => {}
         }
@@ -843,6 +857,7 @@ enum InputMode {
     CommandPalette,
     AddMusic,
     Welcome,
+    TrackInfo,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1487,6 +1502,9 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
     if state.input_mode == InputMode::Welcome {
         render_add_music_overlay(frame, state, palette, true);
     }
+    if state.input_mode == InputMode::TrackInfo {
+        render_track_info_overlay(frame, state, palette);
+    }
 
     areas
 }
@@ -2060,6 +2078,68 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
     }
 }
 
+fn render_track_info_overlay(frame: &mut Frame, state: &ShellState, palette: &Palette) {
+    let track = match state.selected_track_item() {
+        Some(t) => t,
+        None => return,
+    };
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Title:   ", Style::default().fg(palette.text_muted)),
+            Span::styled(track.title.clone(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("Artist:  ", Style::default().fg(palette.text_muted)),
+            Span::styled(track.artist.clone(), Style::default().fg(palette.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("Album:   ", Style::default().fg(palette.text_muted)),
+            Span::styled(track.album.clone(), Style::default().fg(palette.text)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Path:    ", Style::default().fg(palette.text_muted)),
+            Span::styled(track.path.clone(), Style::default().fg(palette.text)),
+        ]),
+        Line::from(""),
+    ];
+
+    let duration = track.duration_ms.map(|ms| {
+        let secs = ms / 1000;
+        format!("{}:{:02}", secs / 60, secs % 60)
+    }).unwrap_or_else(|| "--:--".to_string());
+
+    let sample_rate = track.sample_rate.map(|sr| format!("{} Hz", sr)).unwrap_or_else(|| "-".to_string());
+    let channels = track.channels.map(|ch| format!("{}", ch)).unwrap_or_else(|| "-".to_string());
+    let bit_depth = track.bit_depth.map(|bd| format!("{}-bit", bd)).unwrap_or_else(|| "-".to_string());
+
+    lines.push(Line::from(vec![
+        Span::styled("Duration:    ", Style::default().fg(palette.text_muted)),
+        Span::styled(duration, Style::default().fg(palette.text)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Sample Rate: ", Style::default().fg(palette.text_muted)),
+        Span::styled(sample_rate, Style::default().fg(palette.text)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Channels:    ", Style::default().fg(palette.text_muted)),
+        Span::styled(channels, Style::default().fg(palette.text)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Bit Depth:   ", Style::default().fg(palette.text_muted)),
+        Span::styled(bit_depth, Style::default().fg(palette.text)),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Press Esc or i to close",
+        Style::default().fg(palette.text_muted),
+    )));
+
+    crate::modal::render_modal(frame, "Track Info", lines, 60, 50, palette);
+}
+
 fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
     let area = centered_rect(65, 60, frame.area());
     frame.render_widget(Clear, area);
@@ -2085,6 +2165,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
         Line::from("Mouse wheel: scroll selected pane"),
         Line::from("q or Ctrl-C: quit"),
         Line::from("r: refresh library"),
+        Line::from("i: track info"),
         Line::from("?: toggle this help"),
     ];
     let paragraph = Paragraph::new(lines)

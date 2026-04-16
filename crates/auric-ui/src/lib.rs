@@ -3,10 +3,12 @@ use std::collections::BTreeMap;
 pub mod artwork;
 pub mod browse;
 pub mod file_browser;
+pub mod modal;
 pub mod seekbar;
 pub mod shell;
 pub mod terminal_caps;
 pub mod theme;
+pub mod visualizer;
 
 pub use shell::{
     render_once_to_text, run_interactive, run_interactive_full, run_interactive_with_handlers,
