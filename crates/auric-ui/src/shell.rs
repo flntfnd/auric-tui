@@ -100,9 +100,11 @@ pub struct ShellSnapshot {
     pub feature_summary: Vec<(String, bool)>,
     pub status_lines: Vec<String>,
     pub playback_status: String,
+    pub now_playing_path: String,
     pub now_playing_title: String,
     pub now_playing_artist: String,
     pub now_playing_album: String,
+    pub now_playing_artwork: Option<Vec<u8>>,
     pub now_playing_duration_ms: u64,
     pub now_playing_position_ms: u64,
     pub volume: f32,
@@ -140,6 +142,7 @@ pub struct ShellState {
     pub playback_duration_ms: u64,
     pub playback_status: String,
     pub seek_bar_area: Rect,
+    pub artwork: crate::artwork::ArtworkState,
     pub browse: crate::browse::BrowseState,
     browse_filter_artist: Option<String>,
     browse_filter_album: Option<String>,
@@ -172,6 +175,7 @@ impl ShellState {
             playback_duration_ms: 0,
             playback_status: "stopped".to_string(),
             seek_bar_area: Rect::default(),
+            artwork: crate::artwork::ArtworkState::new(),
             browse: crate::browse::BrowseState::new(),
             browse_filter_artist: None,
             browse_filter_album: None,
@@ -1831,6 +1835,28 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
     let has_track = !state.snapshot.now_playing_title.is_empty();
 
     if has_track {
+        // Update artwork state when track changes
+        state.artwork.update(
+            &state.snapshot.now_playing_path,
+            state.snapshot.now_playing_artwork.as_deref(),
+            state.snapshot.pixel_art_enabled,
+            state.snapshot.pixel_art_cell_size,
+        );
+
+        // Split content area: artwork on left (square), text on right
+        let show_art = state.artwork.has_image() && content_area.height >= 3;
+        let art_width = if show_art {
+            content_area.height.saturating_mul(2).min(content_area.width / 3)
+        } else {
+            0
+        };
+        let text_area = Rect {
+            x: content_area.x + art_width,
+            y: content_area.y,
+            width: content_area.width.saturating_sub(art_width),
+            height: content_area.height,
+        };
+
         let status_icon = if is_playing {
             ">"
         } else if is_paused {
@@ -1864,9 +1890,9 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
             ),
         ]);
         let title_area = Rect {
-            x: content_area.x,
-            y: content_area.y,
-            width: content_area.width,
+            x: text_area.x,
+            y: text_area.y,
+            width: text_area.width,
             height: 1,
         };
         frame.render_widget(Paragraph::new(title_line), title_area);
@@ -1884,9 +1910,9 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
         let remaining_str = format_ms(remaining_ms);
 
         let seek_bar_rect = Rect {
-            x: content_area.x,
-            y: content_area.y + 1,
-            width: content_area.width,
+            x: text_area.x,
+            y: text_area.y + 1,
+            width: text_area.width,
             height: 1,
         };
         state.seek_bar_area = seek_bar_rect;
@@ -1919,12 +1945,29 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
             ),
         ]);
         let info_area = Rect {
-            x: content_area.x,
-            y: content_area.y + 2,
-            width: content_area.width,
+            x: text_area.x,
+            y: text_area.y + 2,
+            width: text_area.width,
             height: 1,
         };
         frame.render_widget(Paragraph::new(info_line), info_area);
+
+        // Render album artwork on the left
+        if show_art {
+            let art_area = Rect {
+                x: content_area.x,
+                y: content_area.y,
+                width: art_width,
+                height: content_area.height,
+            };
+            if let Some(protocol) = &mut state.artwork.current_image {
+                frame.render_stateful_widget(
+                    ratatui_image::StatefulImage::default(),
+                    art_area,
+                    protocol,
+                );
+            }
+        }
     } else {
         // Reset seek bar area when no track is playing
         state.seek_bar_area = Rect::default();
@@ -2489,9 +2532,11 @@ mod tests {
             ],
             status_lines: vec!["ready".into()],
             playback_status: "stopped".to_string(),
+            now_playing_path: String::new(),
             now_playing_title: String::new(),
             now_playing_artist: String::new(),
             now_playing_album: String::new(),
+            now_playing_artwork: None,
             now_playing_duration_ms: 0,
             now_playing_position_ms: 0,
             volume: 1.0,

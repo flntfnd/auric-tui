@@ -2539,6 +2539,11 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
             PlaybackStatus::Stopped => "stopped",
         }
         .to_string(),
+        now_playing_path: app
+            .playback_state
+            .current_entry()
+            .map(|e| e.path.clone())
+            .unwrap_or_default(),
         now_playing_title: app
             .playback_state
             .current_entry()
@@ -2554,6 +2559,10 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
             .current_entry()
             .and_then(|e| e.album.clone())
             .unwrap_or_default(),
+        now_playing_artwork: app
+            .playback_state
+            .current_entry()
+            .and_then(|e| app.db.get_artwork_data_for_track(&e.path).ok().flatten()),
         now_playing_duration_ms: app
             .playback_state
             .current_entry()

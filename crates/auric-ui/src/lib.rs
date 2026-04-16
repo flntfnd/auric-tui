@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+pub mod artwork;
 pub mod browse;
 pub mod file_browser;
 pub mod seekbar;

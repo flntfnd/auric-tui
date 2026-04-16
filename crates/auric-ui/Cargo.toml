@@ -10,6 +10,8 @@ ratatui.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+ratatui-image.workspace = true
+image.workspace = true
 auric-core = { path = "../auric-core" }
 
 [dev-dependencies]
