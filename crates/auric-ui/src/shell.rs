@@ -1872,11 +1872,9 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
 
     // Calculate column widths proportionally
     let total_w = inner.width as usize;
-    let col_icon = 4usize;
-    let col_time = 7;
-    let col_fav = 4;
+    let col_time = 7usize;
     let col_quality = 14;
-    let fixed = col_icon + col_time + col_fav + col_quality;
+    let fixed = col_time + col_quality;
     let flexible = total_w.saturating_sub(fixed);
     let col_title = flexible * 30 / 100;
     let col_artist = flexible * 25 / 100;
@@ -1884,11 +1882,11 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
 
     let header_x = inner.x;
     let offsets = TrackColumnOffsets {
-        title_start: header_x + col_icon as u16,
-        time_start: header_x + (col_icon + col_title) as u16,
-        artist_start: header_x + (col_icon + col_title + col_time) as u16,
-        album_start: header_x + (col_icon + col_title + col_time + col_artist) as u16,
-        quality_start: header_x + (col_icon + col_title + col_time + col_artist + col_album + col_fav) as u16,
+        title_start: header_x,
+        time_start: header_x + col_title as u16,
+        artist_start: header_x + (col_title + col_time) as u16,
+        album_start: header_x + (col_title + col_time + col_artist) as u16,
+        quality_start: header_x + (col_title + col_time + col_artist + col_album) as u16,
     };
 
     let sort_indicator = |col: SortColumn| -> &str {
@@ -1907,7 +1905,6 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
     };
 
     let header = Line::from(vec![
-        Span::styled(pad_cell("", col_icon), Style::default().fg(palette.text_muted)),
         Span::styled(
             pad_cell(&format!("Title{}", sort_indicator(SortColumn::Title)), col_title),
             sort_style(SortColumn::Title),
@@ -1924,7 +1921,6 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
             pad_cell(&format!("Album{}", sort_indicator(SortColumn::Album)), col_album),
             sort_style(SortColumn::Album),
         ),
-        Span::styled(pad_cell("Fav", col_fav), Style::default().fg(palette.text_muted)),
         Span::styled(
             format!("Quality{}", sort_indicator(SortColumn::Quality)),
             sort_style(SortColumn::Quality),
@@ -1973,15 +1969,12 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
         state
             .filtered_track_iter()
             .map(|t| {
-                let icon = icon_glyph(state.snapshot.icon_mode, IconToken::Track);
                 let row = format!(
-                    "{} {}{}{}{}{}{}",
-                    pad_cell(icon, col_icon.saturating_sub(1)),
+                    "{}{}{}{}{}",
                     pad_cell(&truncate_text(&t.title, col_title.saturating_sub(1)), col_title),
                     pad_cell(&format_duration_short(t.duration_ms), col_time),
                     pad_cell(&truncate_text(&t.artist, col_artist.saturating_sub(1)), col_artist),
                     pad_cell(&truncate_text(&t.album, col_album.saturating_sub(1)), col_album),
-                    pad_cell("☆", col_fav),
                     format_tech_compact(t.sample_rate, t.bit_depth, t.channels)
                 );
                 ListItem::new(Line::from(Span::styled(
