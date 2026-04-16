@@ -865,9 +865,13 @@ impl ShellState {
             areas.tracks.visible_items,
         );
         if self.browse.show_items {
-            let browse_inner = borderless_content_area(areas.browse);
-            let modes_height = crate::browse::BrowseMode::all().len() as u16 + 1;
-            let items_visible = browse_inner.height.saturating_sub(modes_height) as usize;
+            let items_visible = if let Some(ref bi) = areas.browse_items {
+                bi.visible_items
+            } else {
+                let browse_inner = borderless_content_area(areas.browse);
+                let modes_height = crate::browse::BrowseMode::all().len() as u16 + 1;
+                browse_inner.height.saturating_sub(modes_height) as usize
+            };
             self.browse.item_scroll = normalize_scroll(
                 self.browse.item_scroll,
                 self.browse.item_index,
@@ -883,6 +887,14 @@ impl ShellState {
             self.focus = FocusPane::Sources;
         } else if areas.browse.contains(point) {
             self.focus = FocusPane::Browse;
+        } else if let Some(ref bi) = areas.browse_items {
+            if bi.outer.contains(point) {
+                self.focus = FocusPane::Browse;
+            } else if areas.playlists.outer.contains(point) {
+                self.focus = FocusPane::Inspector;
+            } else if areas.tracks.outer.contains(point) {
+                self.focus = FocusPane::Tracks;
+            }
         } else if areas.playlists.outer.contains(point) {
             self.focus = FocusPane::Inspector;
         } else if areas.tracks.outer.contains(point) {
@@ -907,6 +919,17 @@ impl ShellState {
         ) {
             self.selected_playlist = index;
             return;
+        }
+        if let Some(ref bi) = areas.browse_items {
+            if let Some(index) = bi.mouse_item_index(
+                x,
+                y,
+                self.browse.item_scroll,
+                self.browse.items.len(),
+            ) {
+                self.browse.item_index = index;
+                return;
+            }
         }
         if let Some(index) = areas.tracks.mouse_item_index(
             x,
@@ -1118,6 +1141,7 @@ impl PaneArea {
 struct RenderAreas {
     roots: PaneArea,
     browse: Rect,
+    browse_items: Option<PaneArea>,
     playlists: PaneArea,
     tracks: PaneArea,
     track_header: Rect,
@@ -1626,12 +1650,30 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
         ])
         .split(right_col);
 
-    let (header_area, library_rows_area) = library_panel_inner_areas(right_sections[2]);
+    let library_area = right_sections[2];
+    let has_browse_split = state.browse.show_items && !state.browse.items.is_empty();
+
+    let (tracks_area, browse_items_area) = if has_browse_split {
+        let lib_cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(30),
+                Constraint::Length(1),
+                Constraint::Percentage(70),
+            ])
+            .split(library_area);
+        (lib_cols[2], Some(lib_cols[0]))
+    } else {
+        (library_area, None)
+    };
+
+    let (header_area, library_rows_area) = library_panel_inner_areas(tracks_area);
     let areas = RenderAreas {
         roots: PaneArea::borderless(left_sections[0], 1),
         browse: left_sections[2],
+        browse_items: browse_items_area.map(|a| PaneArea::bordered(a, 1)),
         playlists: PaneArea::borderless(left_sections[4], 1),
-        tracks: PaneArea::from_list_area(right_sections[2], library_rows_area, 1),
+        tracks: PaneArea::from_list_area(tracks_area, library_rows_area, 1),
         track_header: header_area,
         track_col_offsets: TrackColumnOffsets::default(),
     };
@@ -1641,8 +1683,21 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
     render_browse_modes(frame, left_sections[2], state, palette);
     render_playlists(frame, left_sections[4], state, palette);
     render_now_playing(frame, right_sections[0], state, palette);
-    let col_offsets = render_tracks(frame, right_sections[2], state, palette);
-    // Can't mutate areas after sync_scroll_offsets borrow, so we rebuild with col_offsets
+
+    if has_browse_split {
+        let lib_cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(30),
+                Constraint::Length(1),
+                Constraint::Percentage(70),
+            ])
+            .split(library_area);
+        render_browse_items(frame, lib_cols[0], state, palette);
+        render_vertical_separator(frame, lib_cols[1], palette);
+    }
+
+    let col_offsets = render_tracks(frame, tracks_area, state, palette);
     let areas = RenderAreas { track_col_offsets: col_offsets, ..areas };
     render_status(frame, footer, state, palette);
 
@@ -1799,41 +1854,65 @@ fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palett
         lines.push(Line::from(spans));
     }
 
-    if state.browse.show_items && !state.browse.items.is_empty() {
-        lines.push(Line::from(""));
-        let visible_height = content_area
-            .height
-            .saturating_sub(lines.len() as u16) as usize;
-        let scroll = state.browse.item_scroll;
-        let end = (scroll + visible_height).min(state.browse.items.len());
-        for idx in scroll..end {
-            let item = &state.browse.items[idx];
-            let is_selected = idx == state.browse.item_index;
-            let is_active = state.browse.selected_item.as_deref() == Some(item.as_str());
-            let highlight = focused && state.browse.show_items && is_selected;
-            let fg = if is_active {
-                palette.focus
-            } else if is_selected {
-                palette.text
-            } else {
-                palette.text_muted
-            };
-            let mut style = Style::default().fg(fg).add_modifier(dim);
-            if is_active {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            if highlight {
-                style = style.add_modifier(Modifier::REVERSED);
-            }
-            lines.push(Line::from(Span::styled(
-                format!("  {item}"),
-                style,
-            )));
-        }
-    }
-
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, content_area);
+}
+
+fn render_browse_items(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
+    let title = match state.browse.mode {
+        crate::browse::BrowseMode::Artists => "Artists",
+        crate::browse::BrowseMode::Albums => "Albums",
+        crate::browse::BrowseMode::Songs => return,
+    };
+
+    let focused = state.focus == FocusPane::Browse;
+    let block = pane_block(title, focused, palette);
+    let content_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    if content_area.width == 0 || content_area.height == 0 {
+        return;
+    }
+
+    let base_style = if focused {
+        Style::default().fg(palette.text)
+    } else {
+        Style::default().fg(palette.text).add_modifier(Modifier::DIM)
+    };
+
+    let items: Vec<ListItem> = state
+        .browse
+        .items
+        .iter()
+        .enumerate()
+        .map(|(_i, item)| {
+            let is_active = state.browse.selected_item.as_deref() == Some(item.as_str());
+            let style = if is_active {
+                base_style.fg(palette.focus).add_modifier(Modifier::BOLD)
+            } else {
+                base_style
+            };
+            ListItem::new(Line::from(Span::styled(item.as_str(), style)))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .highlight_symbol("▌ ")
+        .highlight_style(
+            Style::default()
+                .bg(palette.selection_bg)
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let mut list_state = ListState::default().with_selected(Some(
+        state
+            .browse
+            .item_index
+            .min(state.browse.items.len().saturating_sub(1)),
+    ));
+    list_state = list_state.with_offset(state.browse.item_scroll);
+    frame.render_stateful_widget(list, content_area, &mut list_state);
 }
 
 fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
@@ -1886,21 +1965,24 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palet
 }
 
 fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) -> TrackColumnOffsets {
-    let title = if state.track_filter_query.is_empty() {
+    let title = {
         let filtered = state.filtered_track_count();
         let total = state.snapshot.total_track_count;
-        if filtered < total {
+        let base = if let Some(ref artist) = state.browse_filter_artist {
+            format!("{artist} ({filtered})")
+        } else if let Some(ref album) = state.browse_filter_album {
+            format!("{album} ({filtered})")
+        } else if !state.track_filter_query.is_empty() {
+            format!(
+                "Library ({}/{}) /{}",
+                filtered, total, state.track_filter_query
+            )
+        } else if filtered < total {
             format!("Library ({}/{})", filtered, total)
         } else {
             format!("Library ({})", filtered)
-        }
-    } else {
-        format!(
-            "Library ({}/{}) /{}",
-            state.filtered_track_count(),
-            state.snapshot.total_track_count,
-            state.track_filter_query
-        )
+        };
+        base
     };
     let outer_block = pane_block(&title, state.focus == FocusPane::Tracks, palette);
     let inner = outer_block.inner(area);
@@ -3190,6 +3272,7 @@ mod tests {
         let areas = RenderAreas {
             roots: PaneArea::bordered(Rect::new(0, 0, 20, 8), 1),
             browse: Rect::new(0, 16, 20, 8),
+            browse_items: None,
             playlists: PaneArea::bordered(Rect::new(0, 8, 20, 8), 1),
             tracks: PaneArea::bordered(Rect::new(20, 0, 40, 8), 1),
             track_header: Rect::new(20, 0, 40, 1),
