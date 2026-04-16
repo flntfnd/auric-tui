@@ -12,7 +12,7 @@ impl TerminalCaps {
         let supports_drag_drop = matches!(
             term_program.as_str(),
             "iTerm.app" | "iTerm2" | "WezTerm" | "ghostty" | "foot"
-        ) || env::var("TERM").map_or(false, |t| t.contains("kitty"));
+        ) || env::var("TERM").is_ok_and(|t| t.contains("kitty"));
 
         Self {
             supports_drag_drop,

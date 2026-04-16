@@ -31,6 +31,7 @@ impl Clone for ArtworkState {
 impl ArtworkState {
     /// Create a new ArtworkState. Queries the terminal for graphics protocol
     /// support. Must be called BEFORE entering alternate screen mode.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let picker = Picker::from_query_stdio().ok();
         Self {

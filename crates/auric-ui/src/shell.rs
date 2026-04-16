@@ -645,8 +645,8 @@ impl ShellState {
         let asc = self.sort_ascending;
         self.filtered_track_indices.sort_by(|&a, &b| {
             let cmp = match col {
-                SortColumn::Title => tracks[a].title.to_lowercase().cmp(&tracks[b].title.to_lowercase()),
-                SortColumn::Artist => tracks[a].artist.to_lowercase().cmp(&tracks[b].artist.to_lowercase()),
+                SortColumn::Title => tracks[a].title.to_ascii_lowercase().cmp(&tracks[b].title.to_ascii_lowercase()),
+                SortColumn::Artist => tracks[a].artist.to_ascii_lowercase().cmp(&tracks[b].artist.to_ascii_lowercase()),
                 SortColumn::Time => tracks[a].duration_ms.cmp(&tracks[b].duration_ms),
                 SortColumn::Quality => tracks[a].sample_rate.cmp(&tracks[b].sample_rate),
             };
@@ -1114,6 +1114,7 @@ fn run_interactive_with_optional_handlers(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_interactive_full<FRefresh, FCommand, FScan, FPlayback, FPlayerPoll>(
     state: &mut ShellState,
     palette: &Palette,
@@ -1143,6 +1144,7 @@ where
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_interactive_full_inner(
     state: &mut ShellState,
     palette: &Palette,
@@ -1191,6 +1193,7 @@ fn run_interactive_full_inner(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     state: &mut ShellState,
@@ -1930,7 +1933,7 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
                 }),
             ),
             Span::styled(
-                state.snapshot.now_playing_title.clone(),
+                state.snapshot.now_playing_title.as_str(),
                 Style::default()
                     .fg(palette.text)
                     .add_modifier(Modifier::BOLD),
@@ -2022,7 +2025,7 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
             };
             frame.render_widget(
                 crate::visualizer::SpectrumWidget {
-                    bands: &state.spectrum_bands.clone(),
+                    bands: &state.spectrum_bands,
                     palette,
                 },
                 viz_area,
@@ -2091,7 +2094,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
     };
     let mut title_spans = vec![
         Span::styled(
-            state.snapshot.app_title.clone(),
+            state.snapshot.app_title.as_str(),
             Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -2106,11 +2109,9 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
         ));
     }
     lines.push(Line::from(title_spans));
+    let status_msg = state.status_message.as_deref().unwrap_or(default_status_message());
     lines.push(Line::from(Span::styled(
-        state
-            .status_message
-            .clone()
-            .unwrap_or_else(|| default_status_message().to_string()),
+        status_msg,
         Style::default().fg(if state.scanning_path.is_some() {
             palette.accent
         } else {
@@ -2147,20 +2148,20 @@ fn render_track_info_overlay(frame: &mut Frame, state: &ShellState, palette: &Pa
         Line::from(""),
         Line::from(vec![
             Span::styled("Title:   ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.title.clone(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+            Span::styled(track.title.as_str(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
             Span::styled("Artist:  ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.artist.clone(), Style::default().fg(palette.text)),
+            Span::styled(track.artist.as_str(), Style::default().fg(palette.text)),
         ]),
         Line::from(vec![
             Span::styled("Album:   ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.album.clone(), Style::default().fg(palette.text)),
+            Span::styled(track.album.as_str(), Style::default().fg(palette.text)),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("Path:    ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.path.clone(), Style::default().fg(palette.text)),
+            Span::styled(track.path.as_str(), Style::default().fg(palette.text)),
         ]),
         Line::from(""),
     ];
@@ -2254,7 +2255,7 @@ fn render_command_palette_overlay(frame: &mut Frame, state: &ShellState, palette
         Line::from(vec![
             Span::styled(":", Style::default().fg(palette.focus).add_modifier(Modifier::BOLD)),
             Span::styled(
-                state.command_palette_input.clone(),
+                state.command_palette_input.as_str(),
                 Style::default().fg(palette.text),
             ),
         ]),
@@ -2611,7 +2612,6 @@ enum IconToken {
     Folder,
     Playlist,
     Track,
-    Theme,
 }
 
 fn icon_glyph(mode: IconMode, token: IconToken) -> &'static str {
@@ -2619,11 +2619,9 @@ fn icon_glyph(mode: IconMode, token: IconToken) -> &'static str {
         (IconMode::NerdFont, IconToken::Folder) => "󰉋",
         (IconMode::NerdFont, IconToken::Playlist) => "󰲹",
         (IconMode::NerdFont, IconToken::Track) => "󰎆",
-        (IconMode::NerdFont, IconToken::Theme) => "󰔎",
         (IconMode::Ascii, IconToken::Folder) => "[D]",
         (IconMode::Ascii, IconToken::Playlist) => "[P]",
         (IconMode::Ascii, IconToken::Track) => "[*]",
-        (IconMode::Ascii, IconToken::Theme) => "[#]",
     }
 }
 

@@ -26,11 +26,16 @@ impl<'a> Widget for SeekBar<'a> {
 
         // Progress bar
         let filled = ((bar_width as f32) * self.progress.clamp(0.0, 1.0)).round() as u16;
+        let filled_str = "━";
+        let empty_str = "─";
         for x in bar_start..bar_end {
             let is_filled = x.saturating_sub(bar_start) < filled;
-            let ch = if is_filled { '━' } else { '─' };
-            let color = if is_filled { self.palette.progress_fill } else { self.palette.border };
-            buf.set_string(x, area.y, ch.to_string(), Style::default().fg(color));
+            let (s, color) = if is_filled {
+                (filled_str, self.palette.progress_fill)
+            } else {
+                (empty_str, self.palette.border)
+            };
+            buf.set_string(x, area.y, s, Style::default().fg(color));
         }
 
         // Playhead

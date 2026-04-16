@@ -30,8 +30,8 @@ pub struct BrowseState {
     pub show_items: bool,
 }
 
-impl BrowseState {
-    pub fn new() -> Self {
+impl Default for BrowseState {
+    fn default() -> Self {
         Self {
             mode: BrowseMode::Songs,
             mode_index: 0,
@@ -41,6 +41,12 @@ impl BrowseState {
             selected_item: None,
             show_items: false,
         }
+    }
+}
+
+impl BrowseState {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn set_mode(&mut self, mode: BrowseMode) {

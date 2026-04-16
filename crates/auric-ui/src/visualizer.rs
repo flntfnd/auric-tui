@@ -2,7 +2,7 @@ use crate::theme::Palette;
 use ratatui::prelude::*;
 use ratatui::widgets::Widget;
 
-const BAR_CHARS: [char; 8] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '█'];
+const BAR_STRS: [&str; 8] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "█"];
 
 pub struct SpectrumWidget<'a> {
     pub bands: &'a [f32],
@@ -36,20 +36,21 @@ impl<'a> Widget for SpectrumWidget<'a> {
             for row in 0..area.height {
                 let y = area.y + area.height - 1 - row;
                 let row_f = row as f32;
-                let ch = if row_f + 1.0 <= fill_h {
-                    BAR_CHARS[7]
+                let char_idx = if row_f + 1.0 <= fill_h {
+                    7
                 } else if row_f < fill_h {
                     let frac = fill_h - row_f;
-                    BAR_CHARS[(frac * 7.0).clamp(0.0, 7.0) as usize]
+                    (frac * 7.0).clamp(0.0, 7.0) as usize
                 } else {
-                    BAR_CHARS[0]
+                    0
                 };
-                if ch != ' ' {
+                if char_idx != 0 {
+                    let s = BAR_STRS[char_idx];
                     for dx in 0..bar_width.min((area.x + area.width - x) as usize) {
                         buf.set_string(
                             x + dx as u16,
                             y,
-                            ch.to_string(),
+                            s,
                             Style::default().fg(color),
                         );
                     }
