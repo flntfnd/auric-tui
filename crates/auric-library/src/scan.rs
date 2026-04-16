@@ -162,7 +162,7 @@ impl DirectoryScanner {
 
             batch.push(TrackRecord {
                 id: TrackId(Uuid::new_v4()),
-                path: path_string,
+                path: path_string.clone(),
                 title,
                 artist,
                 album,
@@ -179,7 +179,7 @@ impl DirectoryScanner {
             if let Some(artwork) = artwork {
                 embedded_artwork_candidates += 1;
                 artwork_batch.push(TrackArtworkUpsert {
-                    track_path: batch.last().map(|t| t.path.clone()).unwrap_or_default(),
+                    track_path: path_string,
                     source_kind: "embedded".to_string(),
                     source: "embedded".to_string(),
                     mime_type: artwork.mime_type,

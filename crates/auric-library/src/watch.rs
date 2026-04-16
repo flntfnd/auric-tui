@@ -204,7 +204,7 @@ impl WatchedFolderService {
             match rx.recv_timeout(timeout) {
                 Ok(Ok(event)) => {
                     observed_notify_events += 1;
-                    let now_ms = started.elapsed().as_millis() as u64;
+                    let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                     let changed_roots = roots_for_event_paths(&final_roots, &event);
                     if changed_roots.is_empty() {
                         ignored_notify_events += 1;
@@ -228,7 +228,7 @@ impl WatchedFolderService {
                 db,
                 &mut rescans,
                 &mut pending,
-                started.elapsed().as_millis() as u64,
+                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             )?;
         }
 

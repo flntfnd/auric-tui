@@ -686,6 +686,7 @@ impl Database {
     }
 
     pub fn distinct_genres(&self) -> Result<Vec<String>, DbError> {
+        // Genre is not stored in the current schema; reserved for a future schema version.
         Ok(Vec::new())
     }
 
@@ -1189,28 +1190,24 @@ fn escape_sql_like(input: &str) -> String {
 }
 
 fn bool_to_i64(v: bool) -> i64 {
-    if v {
-        1
-    } else {
-        0
-    }
+    i64::from(v)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(digest.len() * 2);
-    for b in digest {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{b:02x}");
-    }
-    out
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, b| {
+            use std::fmt::Write as _;
+            write!(acc, "{b:02x}").expect("write to String is infallible");
+            acc
+        })
 }
 
 fn now_ms() -> i64 {
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock is before UNIX_EPOCH");
-    dur.as_millis() as i64
+    i64::try_from(dur.as_millis()).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
