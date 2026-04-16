@@ -129,6 +129,7 @@ pub struct UiConfig {
     pub icon_pack: String,
     pub icon_fallback: String,
     pub preferred_terminal_font: String,
+    pub use_theme_background: bool,
 }
 
 impl Default for UiConfig {
@@ -143,6 +144,7 @@ impl Default for UiConfig {
             icon_pack: "nerd-font".to_string(),
             icon_fallback: "ascii".to_string(),
             preferred_terminal_font: "FiraCode Nerd Font Mono".to_string(),
+            use_theme_background: false,
         }
     }
 }
@@ -2122,7 +2124,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
 
 fn load_ui_palette_and_snapshot(app: &BootstrappedApp) -> (Palette, ShellSnapshot) {
     let store = FsThemeStore::new(default_theme_dir());
-    let palette = match store.load_palette(&app.config.ui.theme) {
+    let mut palette = match store.load_palette(&app.config.ui.theme) {
         Ok(p) => p,
         Err(err) => {
             eprintln!(
@@ -2132,6 +2134,7 @@ fn load_ui_palette_and_snapshot(app: &BootstrappedApp) -> (Palette, ShellSnapsho
             Palette::default()
         }
     };
+    palette.use_terminal_bg = !app.config.ui.use_theme_background;
     let snapshot = build_shell_snapshot(app);
     (palette, snapshot)
 }

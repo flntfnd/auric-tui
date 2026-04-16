@@ -39,6 +39,8 @@ pixel_art_artwork = false
 pixel_art_cell_size = 2
 # Reduce redraw cost for heavy terminals: on-change redraws only when art/size changes.
 pixel_art_redraw_policy = "on-change"  # on-change | always
+# Use the theme's background color instead of the terminal's default
+use_theme_background = false
 color_mode = "auto"       # auto | 16 | 256 | truecolor
 refresh_hz = 30
 icon_pack = "nerd-font"   # nerd-font | ascii

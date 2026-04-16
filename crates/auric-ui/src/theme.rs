@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Palette {
+    pub use_terminal_bg: bool,
     pub surface_0: Color,
     pub surface_1: Color,
     pub surface_2: Color,
@@ -28,6 +29,7 @@ pub struct Palette {
 impl Default for Palette {
     fn default() -> Self {
         Self {
+            use_terminal_bg: true,
             surface_0: color_from_hex("#0f1115").unwrap_or(Color::Black),
             surface_1: color_from_hex("#171a21").unwrap_or(Color::Black),
             surface_2: color_from_hex("#202532").unwrap_or(Color::DarkGray),
@@ -81,6 +83,14 @@ impl Palette {
         }
 
         palette
+    }
+
+    pub fn bg_root(&self) -> Color {
+        if self.use_terminal_bg { Color::Reset } else { self.surface_0 }
+    }
+
+    pub fn bg_panel(&self) -> Color {
+        if self.use_terminal_bg { Color::Reset } else { self.surface_1 }
     }
 }
 

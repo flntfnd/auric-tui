@@ -129,6 +129,7 @@ pub struct ShellState {
     terminal_caps: crate::terminal_caps::TerminalCaps,
     scanning_path: Option<String>,
     sort_column: SortColumn,
+    last_click: Option<(Instant, u16, u16)>,
     sort_ascending: bool,
     pub playback_position_ms: u64,
     pub playback_duration_ms: u64,
@@ -157,6 +158,7 @@ impl ShellState {
             scanning_path: None,
             sort_column: SortColumn::Title,
             sort_ascending: true,
+            last_click: None,
             playback_position_ms: 0,
             playback_duration_ms: 0,
             playback_status: "stopped".to_string(),
@@ -298,7 +300,7 @@ impl ShellState {
         KeyAction::Continue
     }
 
-    fn handle_mouse(&mut self, mouse: MouseEvent, areas: &RenderAreas) {
+    fn handle_mouse(&mut self, mouse: MouseEvent, areas: &RenderAreas) -> KeyAction {
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 self.set_focus_from_point(mouse.column, mouse.row, areas);
@@ -334,12 +336,29 @@ impl ShellState {
                         ));
                     }
                 } else {
+                    // Double-click detection
+                    let is_double = self
+                        .last_click
+                        .map(|(t, lx, ly)| {
+                            t.elapsed() < Duration::from_millis(400) && lx == x && ly == y
+                        })
+                        .unwrap_or(false);
+
                     self.set_focus_from_point(x, y, areas);
                     self.select_from_mouse_click(x, y, areas);
+
+                    if is_double && self.focus == FocusPane::Tracks {
+                        self.last_click = None;
+                        return KeyAction::Playback(PlaybackAction::PlayTrack {
+                            track_index: self.selected_track,
+                        });
+                    }
+                    self.last_click = Some((Instant::now(), x, y));
                 }
             }
             _ => {}
         }
+        KeyAction::Continue
     }
 
     fn handle_filter_key(&mut self, key: KeyEvent) -> KeyAction {
@@ -1041,8 +1060,8 @@ fn run_loop(
                     Ok(ScanProgress::Progress { discovered, path }) => {
                         state.status_message =
                             Some(format!("Scanning {path}... ({discovered} files found)"));
-                        // Refresh snapshot every 3 seconds to show track count updates
-                        if last_scan_refresh.elapsed() >= Duration::from_secs(3) {
+                        // Refresh snapshot frequently to show track count updates
+                        if last_scan_refresh.elapsed() >= Duration::from_millis(750) {
                             try_refresh_snapshot(state, &mut refresh);
                             last_scan_refresh = Instant::now();
                         }
@@ -1153,7 +1172,23 @@ fn run_loop(
                 },
                 Event::Mouse(mouse) => {
                     if options.mouse {
-                        state.handle_mouse(mouse, &last_areas);
+                        let mouse_action = state.handle_mouse(mouse, &last_areas);
+                        if let KeyAction::Playback(action) = mouse_action {
+                            if let Some(handler) = playback_handler.as_mut() {
+                                match (*handler)(action) {
+                                    Ok(result) => {
+                                        state.status_message = Some(result.status_message);
+                                        if result.refresh_requested {
+                                            try_refresh_snapshot(state, &mut refresh);
+                                        }
+                                    }
+                                    Err(err) => {
+                                        state.status_message =
+                                            Some(format!("Playback error: {err}"));
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Event::Resize(_, _) => {}
@@ -1241,7 +1276,7 @@ pub fn render_once_to_text(
 fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> RenderAreas {
     let root = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().bg(palette.surface_0)),
+        Block::default().style(Style::default().bg(palette.bg_root())),
         root,
     );
 
@@ -1801,7 +1836,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
                 .borders(Borders::ALL)
                 .title("Help")
                 .border_style(Style::default().fg(palette.focus))
-                .style(Style::default().bg(palette.surface_1).fg(palette.text)),
+                .style(Style::default().bg(palette.bg_panel()).fg(palette.text)),
         )
         .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
@@ -1841,7 +1876,7 @@ fn render_command_palette_overlay(frame: &mut Frame, state: &ShellState, palette
                 .borders(Borders::ALL)
                 .title("Command Palette")
                 .border_style(Style::default().fg(palette.focus))
-                .style(Style::default().bg(palette.surface_1).fg(palette.text)),
+                .style(Style::default().bg(palette.bg_panel()).fg(palette.text)),
         )
         .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
@@ -1866,7 +1901,7 @@ fn render_add_music_overlay(
         .borders(Borders::ALL)
         .title(title)
         .border_style(Style::default().fg(palette.focus))
-        .style(Style::default().bg(palette.surface_1).fg(palette.text));
+        .style(Style::default().bg(palette.bg_panel()).fg(palette.text));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -1999,7 +2034,7 @@ fn pane_block<'a>(title: &'a str, focused: bool, palette: &Palette) -> Block<'a>
         } else {
             Style::default().fg(palette.border)
         })
-        .style(Style::default().bg(palette.surface_1).fg(palette.text))
+        .style(Style::default().bg(palette.bg_panel()).fg(palette.text))
 }
 
 fn library_panel_inner_areas(area: Rect) -> (Rect, Rect) {
