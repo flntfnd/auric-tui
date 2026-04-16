@@ -1,3 +1,7 @@
+pub mod update;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 use anyhow::{bail, Context, Result};
 use auric_audio::AudioEngine;
 use auric_core::{
@@ -492,9 +496,22 @@ pub fn run_cli() -> Result<()> {
             let subargs: Vec<String> = args.collect();
             handle_ui_command(&mut app, &subargs)?;
         }
+        "--version" | "-V" | "version" => {
+            println!("auric {VERSION}");
+        }
+        "update" => {
+            println!("Checking for updates...");
+            match update::self_update(VERSION) {
+                Ok(msg) => println!("{msg}"),
+                Err(err) => {
+                    eprintln!("Update failed: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         other => {
             bail!(
-                "unknown command: {other}. expected one of: init, doctor, db-stress [count], feature, root, playlist, scan, watch, artwork, track, audio, playback, ui"
+                "unknown command: {other}. expected one of: init, doctor, db-stress [count], feature, root, playlist, scan, watch, artwork, track, audio, playback, ui, update, version"
             );
         }
     }
@@ -2002,6 +2019,8 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
             let mouse = !has_flag(args, "--no-mouse");
             let (palette, snapshot) = load_ui_palette_and_snapshot(app);
             let mut state = ShellState::new(snapshot);
+            let mut update_checker = update::UpdateChecker::new();
+            let update_handle = update_checker.maybe_check();
             let app_cell = std::cell::RefCell::new(app);
             let lib_config = {
                 let app_ref = app_cell.borrow();
@@ -2159,6 +2178,16 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                         .collect()
                 },
             )?;
+            if let Some(handle) = update_handle {
+                if let Ok(version) = handle.join() {
+                    update_checker.finish_check(version);
+                    if let Some(latest) = update_checker.update_available(VERSION) {
+                        eprintln!(
+                            "\nauric v{latest} is available. Run `auric update` to install."
+                        );
+                    }
+                }
+            }
         }
         "themes" => {
             let store = FsThemeStore::new(default_theme_dir());
