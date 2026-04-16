@@ -1012,6 +1012,7 @@ fn run_loop(
     let mut last_draw = Instant::now();
     let mut last_areas = RenderAreas::default();
     let mut scan_rx: Option<mpsc::Receiver<ScanProgress>> = None;
+    let mut last_scan_refresh = Instant::now();
 
     // Helper closure: handle a PaletteCommandResult, optionally starting a background scan.
     let handle_command_result = |state: &mut ShellState,
@@ -1040,6 +1041,11 @@ fn run_loop(
                     Ok(ScanProgress::Progress { discovered, path }) => {
                         state.status_message =
                             Some(format!("Scanning {path}... ({discovered} files found)"));
+                        // Refresh snapshot every 3 seconds to show track count updates
+                        if last_scan_refresh.elapsed() >= Duration::from_secs(3) {
+                            try_refresh_snapshot(state, &mut refresh);
+                            last_scan_refresh = Instant::now();
+                        }
                     }
                     Ok(ScanProgress::Done { message }) => {
                         state.scanning_path = None;
