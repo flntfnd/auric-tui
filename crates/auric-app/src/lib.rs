@@ -555,7 +555,8 @@ fn handle_tui_playback_action(
 ) -> Result<PaletteCommandResult> {
     match action {
         PlaybackAction::PlayTrack { track_index } => {
-            let tracks = app.db.list_tracks(10000).unwrap_or_default();
+            let total = app.db.stats().map(|s| s.track_count).unwrap_or(250) as usize;
+            let tracks = app.db.list_tracks(total).unwrap_or_default();
             let queue: Vec<PlaybackQueueEntry> = tracks
                 .into_iter()
                 .map(|t| PlaybackQueueEntry {
@@ -2447,7 +2448,7 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
 
     let tracks = app
         .db
-        .list_tracks(250)
+        .list_tracks(stats.track_count.max(250) as usize)
         .unwrap_or_default()
         .into_iter()
         .map(|row| ShellTrackItem {
