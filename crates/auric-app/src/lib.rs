@@ -568,7 +568,8 @@ fn handle_tui_playback_action(
     match action {
         PlaybackAction::PlayTrack { track_index } => {
             let total = app.db.stats().map(|s| s.track_count).unwrap_or(250) as usize;
-            let tracks = app.db.list_tracks(total).unwrap_or_default();
+            let limit = total.min(5000);
+            let tracks = app.db.list_tracks(limit).unwrap_or_default();
             let queue: Vec<PlaybackQueueEntry> = tracks
                 .into_iter()
                 .map(|t| PlaybackQueueEntry {
@@ -2481,9 +2482,10 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
         })
         .collect::<Vec<_>>();
 
+    let track_limit = 5000;
     let tracks = app
         .db
-        .list_tracks(stats.track_count.max(250) as usize)
+        .list_tracks(track_limit)
         .unwrap_or_default()
         .into_iter()
         .map(|row| ShellTrackItem {
@@ -2610,6 +2612,7 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
         .to_string(),
         artists: app.db.distinct_artists().unwrap_or_default(),
         albums: app.db.distinct_albums().unwrap_or_default(),
+        total_track_count: stats.track_count as usize,
         queue_length: app.playback_state.queue.len(),
         queue_position: app
             .playback_state

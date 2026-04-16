@@ -115,6 +115,7 @@ pub struct ShellSnapshot {
     pub queue_position: usize,
     pub artists: Vec<String>,
     pub albums: Vec<(String, String)>,
+    pub total_track_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -1726,12 +1727,18 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palet
 
 fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) -> TrackColumnOffsets {
     let title = if state.track_filter_query.is_empty() {
-        format!("Library ({})", state.filtered_track_count())
+        let filtered = state.filtered_track_count();
+        let total = state.snapshot.total_track_count;
+        if filtered < total {
+            format!("Library ({}/{})", filtered, total)
+        } else {
+            format!("Library ({})", filtered)
+        }
     } else {
         format!(
             "Library ({}/{}) /{}",
             state.filtered_track_count(),
-            state.snapshot.tracks.len(),
+            state.snapshot.total_track_count,
             state.track_filter_query
         )
     };
@@ -2098,7 +2105,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
             Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("  {} tracks{filter_info}", state.snapshot.tracks.len()),
+            format!("  {} tracks{filter_info}", state.snapshot.total_track_count),
             Style::default().fg(palette.text_muted),
         ),
     ];
@@ -2545,7 +2552,7 @@ fn try_refresh_snapshot(state: &mut ShellState, refresh: &mut Option<&mut Refres
     if let Some(refresh_fn) = refresh.as_mut() {
         match (*refresh_fn)() {
             Ok(snapshot) => {
-                let total_tracks = snapshot.tracks.len();
+                let total_tracks = snapshot.total_track_count;
                 state.replace_snapshot(snapshot);
                 state.status_message = Some(format!(
                     "Library refreshed ({total_tracks} tracks)"
@@ -2684,6 +2691,7 @@ mod tests {
             queue_position: 0,
             artists: vec!["Artist".to_string()],
             albums: vec![("Album".to_string(), "Artist".to_string())],
+            total_track_count: 1,
         })
     }
 
