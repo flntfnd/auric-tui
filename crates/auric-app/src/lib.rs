@@ -583,6 +583,7 @@ fn handle_tui_playback_action(
 
             let entry = &app.playback_state.queue[track_index];
             app.player.load(&entry.path);
+            app.player.set_volume(app.playback_state.session.volume);
 
             let title = entry.title.clone().unwrap_or_default();
             Ok(PaletteCommandResult::new(
@@ -611,6 +612,7 @@ fn handle_tui_playback_action(
                         .and_then(|e| e.title.clone());
                     if let Some(path) = entry_path {
                         app.player.load(&path);
+                        app.player.set_volume(app.playback_state.session.volume);
                         app.playback_state.session.status = PlaybackStatus::Playing;
                         let title = entry_title.unwrap_or_default();
                         return Ok(PaletteCommandResult::new(
@@ -637,6 +639,7 @@ fn handle_tui_playback_action(
             if status == PlaybackStatus::Playing || status == PlaybackStatus::Paused {
                 if let Some((path, title)) = entry_info {
                     app.player.load(&path);
+                    app.player.set_volume(app.playback_state.session.volume);
                     app.playback_state.session.status = PlaybackStatus::Playing;
                     return Ok(PaletteCommandResult::new(
                         format!("Playing: {title}"),
@@ -657,6 +660,7 @@ fn handle_tui_playback_action(
             if let Some((path, title)) = entry_info {
                 if status == PlaybackStatus::Playing {
                     app.player.load(&path);
+                    app.player.set_volume(app.playback_state.session.volume);
                 }
                 return Ok(PaletteCommandResult::new(
                     format!("Track: {title}"),

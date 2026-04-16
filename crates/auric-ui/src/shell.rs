@@ -1801,6 +1801,22 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
     )));
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(paragraph, content_area);
+
+    // Settings shortcut, bottom right
+    let hint = " ?: help  :: settings ";
+    let hint_width = hint.len() as u16;
+    if content_area.width > hint_width + 2 {
+        let hint_area = Rect {
+            x: content_area.x + content_area.width - hint_width,
+            y: content_area.y,
+            width: hint_width,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(hint, Style::default().fg(palette.text_muted))),
+            hint_area,
+        );
+    }
 }
 
 fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
