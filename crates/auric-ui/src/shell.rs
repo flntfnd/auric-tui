@@ -155,6 +155,11 @@ pub struct ShellState {
     browse_filter_artist: Option<String>,
     browse_filter_album: Option<String>,
     pub spectrum_bands: Vec<f32>,
+    pub viz_samples: Vec<f32>,
+    pub viz_style: crate::visualizer::VisualizerStyle,
+    pub viz_frame: u64,
+    pub viz_area: Rect,
+    pub fire_history: Vec<Vec<f32>>,
     pub track_change_time: Option<Instant>,
     last_track_path: String,
     track_info_artwork: Option<Vec<u8>>,
@@ -194,6 +199,11 @@ impl ShellState {
             browse_filter_artist: None,
             browse_filter_album: None,
             spectrum_bands: vec![0.0; 32],
+            viz_samples: Vec::new(),
+            viz_style: crate::visualizer::VisualizerStyle::Spectrum,
+            viz_frame: 0,
+            viz_area: Rect::default(),
+            fire_history: Vec::new(),
             track_change_time: None,
             last_track_path: String::new(),
             track_info_artwork: None,
@@ -382,6 +392,13 @@ impl ShellState {
                     if self.sort_ascending { "▲" } else { "▼" }
                 ));
             }
+            KeyCode::Char('v') => {
+                self.viz_style = self.viz_style.next();
+                self.status_message = Some(format!(
+                    "Visualizer: {}",
+                    self.viz_style.label()
+                ));
+            }
             KeyCode::Char('i') if self.focus == FocusPane::Tracks => {
                 let path = self.selected_track_item().map(|t| t.path.clone());
                 if let Some(path) = path {
@@ -413,6 +430,15 @@ impl ShellState {
             MouseEventKind::Down(_) => {
                 let x = mouse.column;
                 let y = mouse.row;
+                // Click on visualizer cycles style
+                if self.viz_area != Rect::default() && self.viz_area.contains((x, y).into()) {
+                    self.viz_style = self.viz_style.next();
+                    self.status_message = Some(format!(
+                        "Visualizer: {}",
+                        self.viz_style.label()
+                    ));
+                    return KeyAction::Continue;
+                }
                 // Check if clicking on the seek bar
                 if self.seek_bar_area != Rect::default() && self.seek_bar_area.contains((x, y).into()) {
                     let elapsed_width = 5u16; // "MM:SS" is 5 chars
@@ -989,6 +1015,7 @@ pub struct PlayerEventUpdate {
     pub status: String,
     pub track_finished: bool,
     pub spectrum_bands: Vec<f32>,
+    pub raw_samples: Vec<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1352,10 +1379,19 @@ fn run_loop(
                     state.spectrum_bands = crate::visualizer::smooth_bands(
                         &state.spectrum_bands,
                         &update.spectrum_bands,
-                        0.6,  // attack: bands rise quickly
-                        0.15, // decay: bands fall smoothly
+                        0.6,
+                        0.15,
                     );
+                    // Update fire history (scrolling spectrogram)
+                    state.fire_history.insert(0, state.spectrum_bands.clone());
+                    if state.fire_history.len() > 40 {
+                        state.fire_history.truncate(40);
+                    }
                 }
+                if !update.raw_samples.is_empty() {
+                    state.viz_samples = update.raw_samples;
+                }
+                state.viz_frame = state.viz_frame.wrapping_add(1);
                 if update.track_finished {
                     // Auto-advance to next track
                     if let Some(handler) = playback_handler.as_mut() {
@@ -2106,12 +2142,17 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
                 height: viz_bottom - viz_top,
             };
             frame.render_widget(
-                crate::visualizer::SpectrumWidget {
+                crate::visualizer::VisualizerWidget {
+                    style: state.viz_style,
                     bands: &state.spectrum_bands,
+                    samples: &state.viz_samples,
                     palette,
+                    frame_count: state.viz_frame,
+                    fire_history: &state.fire_history,
                 },
                 viz_area,
             );
+            state.viz_area = viz_area;
         }
 
         // Render album artwork on the left
@@ -2429,6 +2470,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
         Line::from("q or Ctrl-C: quit"),
         Line::from("r: refresh library"),
         Line::from("i: track info"),
+        Line::from("v: cycle visualizer style (or click visualizer)"),
         Line::from(",: settings"),
         Line::from("?: toggle this help"),
     ];

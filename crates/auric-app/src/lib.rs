@@ -2121,6 +2121,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                     status: "playing".to_string(),
                                     track_finished: false,
                                     spectrum_bands: bands,
+                                    raw_samples: samples,
                                 })
                             }
                             auric_audio::player::PlayerEvent::TrackFinished => {
@@ -2130,6 +2131,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                     status: "stopped".to_string(),
                                     track_finished: true,
                                     spectrum_bands: Vec::new(),
+                                    raw_samples: Vec::new(),
                                 })
                             }
                             auric_audio::player::PlayerEvent::Paused => {
@@ -2139,6 +2141,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                     status: "paused".to_string(),
                                     track_finished: false,
                                     spectrum_bands: Vec::new(),
+                                    raw_samples: Vec::new(),
                                 })
                             }
                             auric_audio::player::PlayerEvent::Stopped => {
@@ -2148,6 +2151,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                     status: "stopped".to_string(),
                                     track_finished: false,
                                     spectrum_bands: Vec::new(),
+                                    raw_samples: Vec::new(),
                                 })
                             }
                             _ => None,
