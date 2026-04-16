@@ -667,6 +667,62 @@ impl Database {
         collect_rows(rows)
     }
 
+    pub fn distinct_artists(&self) -> Result<Vec<String>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT artist FROM tracks WHERE artist IS NOT NULL AND artist != '' ORDER BY artist COLLATE NOCASE ASC",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+    }
+
+    pub fn distinct_albums(&self) -> Result<Vec<(String, String)>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT album, COALESCE(artist, '') FROM tracks WHERE album IS NOT NULL AND album != '' ORDER BY album COLLATE NOCASE ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+    }
+
+    pub fn distinct_genres(&self) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    pub fn list_tracks_by_artist(&self, artist: &str) -> Result<Vec<TrackRow>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, title, artist, album, duration_ms, sample_rate, channels, bit_depth, file_mtime_ms, added_at_ms, updated_at_ms
+             FROM tracks WHERE artist = ?1 ORDER BY album COLLATE NOCASE ASC, path ASC",
+        )?;
+        let rows = stmt.query_map(params![artist], read_track_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn list_tracks_by_album(&self, album: &str) -> Result<Vec<TrackRow>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, title, artist, album, duration_ms, sample_rate, channels, bit_depth, file_mtime_ms, added_at_ms, updated_at_ms
+             FROM tracks WHERE album = ?1 ORDER BY path ASC",
+        )?;
+        let rows = stmt.query_map(params![album], read_track_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn get_artwork_data_for_track(&self, track_path: &str) -> Result<Option<Vec<u8>>, DbError> {
+        self.conn
+            .query_row(
+                "SELECT aa.data
+                 FROM tracks t
+                 JOIN track_artwork ta ON ta.track_id = t.id
+                 JOIN artwork_assets aa ON aa.id = ta.artwork_id
+                 WHERE t.path = ?1
+                 LIMIT 1",
+                params![track_path],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(DbError::from)
+    }
+
     pub fn get_track_by_id(&self, track_id: TrackId) -> Result<Option<TrackRow>, DbError> {
         self.conn
             .query_row(
