@@ -553,8 +553,8 @@ fn play_track(
             }
         }
 
-        // Send position updates roughly every 250ms
-        if last_position_report.elapsed() >= Duration::from_millis(250) {
+        // Send position updates at ~12fps for smooth visualizer
+        if last_position_report.elapsed() >= Duration::from_millis(80) {
             let position_ms = decoded_samples * 1000 / file_sample_rate as u64;
             let _ = event_tx.send(PlayerEvent::Position {
                 position_ms,

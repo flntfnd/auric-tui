@@ -1325,7 +1325,12 @@ fn run_loop(
                     state.playback_duration_ms = update.duration_ms;
                 }
                 if !update.spectrum_bands.is_empty() {
-                    state.spectrum_bands = update.spectrum_bands;
+                    state.spectrum_bands = crate::visualizer::smooth_bands(
+                        &state.spectrum_bands,
+                        &update.spectrum_bands,
+                        0.6,  // attack: bands rise quickly
+                        0.15, // decay: bands fall smoothly
+                    );
                 }
                 if update.track_finished {
                     // Auto-advance to next track

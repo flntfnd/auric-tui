@@ -13,6 +13,7 @@ toml.workspace = true
 ratatui-image.workspace = true
 tachyonfx.workspace = true
 image.workspace = true
+rustfft.workspace = true
 auric-core = { path = "../auric-core" }
 
 [dev-dependencies]
