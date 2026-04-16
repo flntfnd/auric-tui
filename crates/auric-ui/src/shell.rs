@@ -37,6 +37,7 @@ impl IconMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusPane {
     Sources,
+    Browse,
     Tracks,
     Inspector,
 }
@@ -44,7 +45,8 @@ pub enum FocusPane {
 impl FocusPane {
     pub fn next(self) -> Self {
         match self {
-            Self::Sources => Self::Tracks,
+            Self::Sources => Self::Browse,
+            Self::Browse => Self::Tracks,
             Self::Tracks => Self::Inspector,
             Self::Inspector => Self::Sources,
         }
@@ -53,7 +55,8 @@ impl FocusPane {
     pub fn prev(self) -> Self {
         match self {
             Self::Sources => Self::Inspector,
-            Self::Tracks => Self::Sources,
+            Self::Browse => Self::Sources,
+            Self::Tracks => Self::Browse,
             Self::Inspector => Self::Tracks,
         }
     }
@@ -107,6 +110,8 @@ pub struct ShellSnapshot {
     pub repeat_mode: String,
     pub queue_length: usize,
     pub queue_position: usize,
+    pub artists: Vec<String>,
+    pub albums: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +139,9 @@ pub struct ShellState {
     pub playback_position_ms: u64,
     pub playback_duration_ms: u64,
     pub playback_status: String,
+    pub browse: crate::browse::BrowseState,
+    browse_filter_artist: Option<String>,
+    browse_filter_album: Option<String>,
 }
 
 impl ShellState {
@@ -162,6 +170,9 @@ impl ShellState {
             playback_position_ms: 0,
             playback_duration_ms: 0,
             playback_status: "stopped".to_string(),
+            browse: crate::browse::BrowseState::new(),
+            browse_filter_artist: None,
+            browse_filter_album: None,
         };
         state.rebuild_track_filter();
         // Auto-trigger welcome panel on empty library
@@ -191,6 +202,13 @@ impl ShellState {
                 self.selected_root =
                     shift_index(self.selected_root, self.snapshot.roots.len(), delta);
             }
+            FocusPane::Browse => {
+                if self.browse.show_items && !self.browse.items.is_empty() {
+                    self.browse.move_item_selection(delta);
+                } else {
+                    self.browse.move_mode_selection(delta);
+                }
+            }
             FocusPane::Tracks => {
                 self.selected_track = shift_index(
                     self.selected_track,
@@ -208,6 +226,14 @@ impl ShellState {
     pub fn move_to_start(&mut self) {
         match self.focus {
             FocusPane::Sources => self.selected_root = 0,
+            FocusPane::Browse => {
+                if self.browse.show_items && !self.browse.items.is_empty() {
+                    self.browse.item_index = 0;
+                } else {
+                    self.browse.mode_index = 0;
+                    self.browse.mode = crate::browse::BrowseMode::all()[0];
+                }
+            }
             FocusPane::Tracks => self.selected_track = 0,
             FocusPane::Inspector => self.selected_playlist = 0,
         }
@@ -216,6 +242,15 @@ impl ShellState {
     pub fn move_to_end(&mut self) {
         match self.focus {
             FocusPane::Sources => self.selected_root = self.snapshot.roots.len().saturating_sub(1),
+            FocusPane::Browse => {
+                if self.browse.show_items && !self.browse.items.is_empty() {
+                    self.browse.item_index = self.browse.items.len().saturating_sub(1);
+                } else {
+                    let modes = crate::browse::BrowseMode::all();
+                    self.browse.mode_index = modes.len().saturating_sub(1);
+                    self.browse.mode = modes[self.browse.mode_index];
+                }
+            }
             FocusPane::Tracks => {
                 self.selected_track = self.filtered_track_indices.len().saturating_sub(1)
             }
@@ -263,6 +298,12 @@ impl ShellState {
                     &home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")),
                 ));
                 self.input_mode = InputMode::AddMusic;
+            }
+            KeyCode::Enter | KeyCode::Char('l') if self.focus == FocusPane::Browse => {
+                self.handle_browse_enter();
+            }
+            KeyCode::Char('h') | KeyCode::Backspace if self.focus == FocusPane::Browse => {
+                self.handle_browse_back();
             }
             KeyCode::Enter if self.focus == FocusPane::Tracks => {
                 return KeyAction::Playback(PlaybackAction::PlayTrack {
@@ -530,6 +571,20 @@ impl ShellState {
                     .map(|(idx, _)| idx),
             );
         }
+        if let Some(ref artist) = self.browse_filter_artist {
+            self.filtered_track_indices.retain(|&idx| {
+                self.snapshot.tracks[idx]
+                    .artist
+                    .eq_ignore_ascii_case(artist)
+            });
+        }
+        if let Some(ref album) = self.browse_filter_album {
+            self.filtered_track_indices.retain(|&idx| {
+                self.snapshot.tracks[idx]
+                    .album
+                    .eq_ignore_ascii_case(album)
+            });
+        }
         self.apply_sort();
         self.selected_track = self
             .selected_track
@@ -571,6 +626,63 @@ impl ShellState {
         }
         self.apply_sort();
         self.selected_track = 0;
+    }
+
+    fn handle_browse_enter(&mut self) {
+        if self.browse.show_items && !self.browse.items.is_empty() {
+            self.browse.update_selected_item();
+            match self.browse.mode {
+                crate::browse::BrowseMode::Artists => {
+                    self.browse_filter_artist = self.browse.selected_item.clone();
+                    self.browse_filter_album = None;
+                }
+                crate::browse::BrowseMode::Albums => {
+                    self.browse_filter_album = self.browse.selected_item.clone();
+                    self.browse_filter_artist = None;
+                }
+                crate::browse::BrowseMode::Songs => {}
+            }
+            self.rebuild_track_filter();
+        } else {
+            self.apply_browse_mode();
+        }
+    }
+
+    fn handle_browse_back(&mut self) {
+        if self.browse.show_items {
+            self.browse.show_items = false;
+            self.browse.selected_item = None;
+            self.browse_filter_artist = None;
+            self.browse_filter_album = None;
+            self.rebuild_track_filter();
+        }
+    }
+
+    fn apply_browse_mode(&mut self) {
+        let mode = crate::browse::BrowseMode::all()[self.browse.mode_index];
+        self.browse.set_mode(mode);
+        match mode {
+            crate::browse::BrowseMode::Songs => {
+                self.browse.show_items = false;
+                self.browse.items.clear();
+                self.browse_filter_artist = None;
+                self.browse_filter_album = None;
+            }
+            crate::browse::BrowseMode::Artists => {
+                self.browse.show_items = true;
+                self.browse.items = self.snapshot.artists.clone();
+            }
+            crate::browse::BrowseMode::Albums => {
+                self.browse.show_items = true;
+                self.browse.items = self
+                    .snapshot
+                    .albums
+                    .iter()
+                    .map(|(a, _)| a.clone())
+                    .collect();
+            }
+        }
+        self.rebuild_track_filter();
     }
 
     fn filter_status_line(&self, editing: bool) -> String {
@@ -624,12 +736,25 @@ impl ShellState {
             self.filtered_track_indices.len(),
             areas.tracks.visible_items,
         );
+        if self.browse.show_items {
+            let browse_inner = padded_inner(areas.browse);
+            let modes_height = crate::browse::BrowseMode::all().len() as u16 + 1;
+            let items_visible = browse_inner.height.saturating_sub(modes_height) as usize;
+            self.browse.item_scroll = normalize_scroll(
+                self.browse.item_scroll,
+                self.browse.item_index,
+                self.browse.items.len(),
+                items_visible,
+            );
+        }
     }
 
     fn set_focus_from_point(&mut self, x: u16, y: u16, areas: &RenderAreas) {
         let point = (x, y).into();
-        if areas.roots.outer.contains(point) || areas.browse.contains(point) {
+        if areas.roots.outer.contains(point) {
             self.focus = FocusPane::Sources;
+        } else if areas.browse.contains(point) {
+            self.focus = FocusPane::Browse;
         } else if areas.playlists.outer.contains(point) {
             self.focus = FocusPane::Inspector;
         } else if areas.tracks.outer.contains(point) {
@@ -1406,46 +1531,85 @@ fn render_roots(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: 
 }
 
 fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
-    let rows = [
-        ("Artists", IconToken::Folder),
-        ("Genres", IconToken::Theme),
-        ("Albums", IconToken::Playlist),
-        ("Songs", IconToken::Track),
-    ];
-    let mut lines = Vec::with_capacity(rows.len());
-    for (idx, (label, icon_token)) in rows.iter().enumerate() {
-        let selected = idx == 3;
-        lines.push(Line::from(vec![
+    let focused = state.focus == FocusPane::Browse;
+    let block = pane_block("Browse Library", focused, palette);
+    let content_area = padded_inner(area);
+    frame.render_widget(block, area);
+
+    let modes = crate::browse::BrowseMode::all();
+    let mode_icons = [IconToken::Track, IconToken::Folder, IconToken::Playlist];
+    let mut lines = Vec::new();
+
+    for (idx, mode) in modes.iter().enumerate() {
+        let is_current = idx == state.browse.mode_index;
+        let highlight = focused && !state.browse.show_items && is_current;
+        let icon = mode_icons.get(idx).copied().unwrap_or(IconToken::Folder);
+        let mut spans = vec![
             Span::styled(
-                format!("{} ", icon_glyph(state.snapshot.icon_mode, *icon_token)),
-                Style::default().fg(if selected {
+                format!("{} ", icon_glyph(state.snapshot.icon_mode, icon)),
+                Style::default().fg(if is_current {
                     palette.focus
                 } else {
                     palette.text_muted
                 }),
             ),
             Span::styled(
-                *label,
+                mode.label(),
                 Style::default()
-                    .fg(if selected {
+                    .fg(if is_current {
                         palette.text
                     } else {
                         palette.text_muted
                     })
-                    .add_modifier(if selected {
+                    .add_modifier(if is_current {
                         Modifier::BOLD
                     } else {
                         Modifier::empty()
                     }),
             ),
-        ]));
+        ];
+        if highlight {
+            for span in &mut spans {
+                span.style = span.style.add_modifier(Modifier::REVERSED);
+            }
+        }
+        lines.push(Line::from(spans));
     }
 
-    let block = pane_block("Browse Library", false, palette);
-    let content_area = padded_inner(area);
-    frame.render_widget(block, area);
+    if state.browse.show_items && !state.browse.items.is_empty() {
+        lines.push(Line::from(""));
+        let visible_height = content_area
+            .height
+            .saturating_sub(lines.len() as u16) as usize;
+        let scroll = state.browse.item_scroll;
+        let end = (scroll + visible_height).min(state.browse.items.len());
+        for idx in scroll..end {
+            let item = &state.browse.items[idx];
+            let is_selected = idx == state.browse.item_index;
+            let is_active = state.browse.selected_item.as_deref() == Some(item.as_str());
+            let highlight = focused && state.browse.show_items && is_selected;
+            let fg = if is_active {
+                palette.focus
+            } else if is_selected {
+                palette.text
+            } else {
+                palette.text_muted
+            };
+            let mut style = Style::default().fg(fg);
+            if is_active {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            if highlight {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
+            lines.push(Line::from(Span::styled(
+                format!("  {item}"),
+                style,
+            )));
+        }
+    }
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, content_area);
 }
 
@@ -2301,6 +2465,8 @@ mod tests {
             repeat_mode: "off".to_string(),
             queue_length: 0,
             queue_position: 0,
+            artists: vec!["Artist".to_string()],
+            albums: vec![("Album".to_string(), "Artist".to_string())],
         })
     }
 

@@ -2560,6 +2560,8 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
             RepeatMode::All => "all",
         }
         .to_string(),
+        artists: app.db.distinct_artists().unwrap_or_default(),
+        albums: app.db.distinct_albums().unwrap_or_default(),
         queue_length: app.playback_state.queue.len(),
         queue_position: app
             .playback_state
