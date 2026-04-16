@@ -19,6 +19,8 @@ pub struct Palette {
     pub success: Color,
     pub border: Color,
     pub focus: Color,
+    pub border_focused: Color,
+    pub border_unfocused: Color,
     pub selection_bg: Color,
     pub progress_fill: Color,
     pub visualizer_low: Color,
@@ -42,6 +44,8 @@ impl Default for Palette {
             success: color_from_hex("#68d391").unwrap_or(Color::Green),
             border: color_from_hex("#314056").unwrap_or(Color::DarkGray),
             focus: color_from_hex("#90cdf4").unwrap_or(Color::Blue),
+            border_focused: color_from_hex("#90cdf4").unwrap_or(Color::Blue),
+            border_unfocused: color_from_hex("#1e2736").unwrap_or(Color::DarkGray),
             selection_bg: color_from_hex("#2a3446").unwrap_or(Color::DarkGray),
             progress_fill: color_from_hex("#4fd1c5").unwrap_or(Color::Cyan),
             visualizer_low: color_from_hex("#63b3ed").unwrap_or(Color::Blue),
@@ -56,7 +60,7 @@ impl Palette {
         let mut palette = Self::default();
         let get = |key: &str| theme.tokens.get(key).and_then(|v| color_from_hex(v));
 
-        let mappings: [(&str, &mut Color); 17] = [
+        let mappings: [(&str, &mut Color); 19] = [
             ("colors.surface_0", &mut palette.surface_0),
             ("colors.surface_1", &mut palette.surface_1),
             ("colors.surface_2", &mut palette.surface_2),
@@ -69,6 +73,8 @@ impl Palette {
             ("colors.success", &mut palette.success),
             ("colors.border", &mut palette.border),
             ("colors.focus", &mut palette.focus),
+            ("colors.border_focused", &mut palette.border_focused),
+            ("colors.border_unfocused", &mut palette.border_unfocused),
             ("colors.selection_bg", &mut palette.selection_bg),
             ("colors.progress_fill", &mut palette.progress_fill),
             ("colors.visualizer_low", &mut palette.visualizer_low),

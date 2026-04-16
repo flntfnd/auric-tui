@@ -13,7 +13,7 @@ use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::cmp::min;
 use std::io::{self, Stdout};
@@ -2042,14 +2042,21 @@ fn home_dir() -> Option<std::path::PathBuf> {
 }
 
 fn pane_block<'a>(title: &'a str, focused: bool, palette: &Palette) -> Block<'a> {
+    let border_style = if focused {
+        Style::default().fg(palette.border_focused)
+    } else {
+        Style::default().fg(palette.border_unfocused)
+    };
+    let title_style = if focused {
+        Style::default().fg(palette.border_focused).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(palette.text_muted)
+    };
     Block::default()
         .borders(Borders::ALL)
-        .title(format!(" {title} "))
-        .border_style(if focused {
-            Style::default().fg(palette.focus)
-        } else {
-            Style::default().fg(palette.border)
-        })
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(format!(" {title} "), title_style))
+        .border_style(border_style)
         .style(Style::default().bg(palette.bg_panel()).fg(palette.text))
 }
 
