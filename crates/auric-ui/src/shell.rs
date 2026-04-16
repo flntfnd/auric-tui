@@ -128,6 +128,8 @@ pub struct ShellState {
     file_browser: Option<crate::file_browser::FileBrowser>,
     terminal_caps: crate::terminal_caps::TerminalCaps,
     scanning_path: Option<String>,
+    sort_column: SortColumn,
+    sort_ascending: bool,
     pub playback_position_ms: u64,
     pub playback_duration_ms: u64,
     pub playback_status: String,
@@ -153,6 +155,8 @@ impl ShellState {
             file_browser: None,
             terminal_caps: crate::terminal_caps::TerminalCaps::detect(),
             scanning_path: None,
+            sort_column: SortColumn::Title,
+            sort_ascending: true,
             playback_position_ms: 0,
             playback_duration_ms: 0,
             playback_status: "stopped".to_string(),
@@ -281,6 +285,14 @@ impl ShellState {
             KeyCode::Char('s') => {
                 return KeyAction::Playback(PlaybackAction::ToggleShuffle);
             }
+            KeyCode::Char('o') => {
+                self.cycle_sort();
+                self.status_message = Some(format!(
+                    "Sort: {} {}",
+                    self.sort_column.label(),
+                    if self.sort_ascending { "▲" } else { "▼" }
+                ));
+            }
             _ => {}
         }
         KeyAction::Continue
@@ -299,8 +311,32 @@ impl ShellState {
             MouseEventKind::Down(_) => {
                 let x = mouse.column;
                 let y = mouse.row;
-                self.set_focus_from_point(x, y, areas);
-                self.select_from_mouse_click(x, y, areas);
+                // Check if clicking on track list header for sorting
+                if areas.track_header.contains((x, y).into()) {
+                    let co = &areas.track_col_offsets;
+                    let col = if x >= co.quality_start {
+                        Some(SortColumn::Quality)
+                    } else if x >= co.artist_start {
+                        Some(SortColumn::Artist)
+                    } else if x >= co.time_start {
+                        Some(SortColumn::Time)
+                    } else if x >= co.title_start {
+                        Some(SortColumn::Title)
+                    } else {
+                        None
+                    };
+                    if let Some(col) = col {
+                        self.set_sort_column(col);
+                        self.status_message = Some(format!(
+                            "Sort: {} {}",
+                            self.sort_column.label(),
+                            if self.sort_ascending { "▲" } else { "▼" }
+                        ));
+                    }
+                } else {
+                    self.set_focus_from_point(x, y, areas);
+                    self.select_from_mouse_click(x, y, areas);
+                }
             }
             _ => {}
         }
@@ -475,9 +511,47 @@ impl ShellState {
                     .map(|(idx, _)| idx),
             );
         }
+        self.apply_sort();
         self.selected_track = self
             .selected_track
             .min(self.filtered_track_indices.len().saturating_sub(1));
+    }
+
+    fn apply_sort(&mut self) {
+        let tracks = &self.snapshot.tracks;
+        let col = self.sort_column;
+        let asc = self.sort_ascending;
+        self.filtered_track_indices.sort_by(|&a, &b| {
+            let cmp = match col {
+                SortColumn::Title => tracks[a].title.to_lowercase().cmp(&tracks[b].title.to_lowercase()),
+                SortColumn::Artist => tracks[a].artist.to_lowercase().cmp(&tracks[b].artist.to_lowercase()),
+                SortColumn::Time => tracks[a].duration_ms.cmp(&tracks[b].duration_ms),
+                SortColumn::Quality => tracks[a].sample_rate.cmp(&tracks[b].sample_rate),
+            };
+            if asc { cmp } else { cmp.reverse() }
+        });
+    }
+
+    fn set_sort_column(&mut self, col: SortColumn) {
+        if self.sort_column == col {
+            self.sort_ascending = !self.sort_ascending;
+        } else {
+            self.sort_column = col;
+            self.sort_ascending = true;
+        }
+        self.apply_sort();
+        self.selected_track = 0;
+    }
+
+    fn cycle_sort(&mut self) {
+        if self.sort_ascending {
+            self.sort_ascending = false;
+        } else {
+            self.sort_column = self.sort_column.next();
+            self.sort_ascending = true;
+        }
+        self.apply_sort();
+        self.selected_track = 0;
     }
 
     fn filter_status_line(&self, editing: bool) -> String {
@@ -569,6 +643,34 @@ impl ShellState {
             self.filtered_track_indices.len(),
         ) {
             self.selected_track = index;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Title,
+    Time,
+    Artist,
+    Quality,
+}
+
+impl SortColumn {
+    fn next(self) -> Self {
+        match self {
+            Self::Title => Self::Artist,
+            Self::Artist => Self::Time,
+            Self::Time => Self::Quality,
+            Self::Quality => Self::Title,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Title => "Title",
+            Self::Artist => "Artist",
+            Self::Time => "Time",
+            Self::Quality => "Quality",
         }
     }
 }
@@ -718,6 +820,17 @@ struct RenderAreas {
     browse: Rect,
     playlists: PaneArea,
     tracks: PaneArea,
+    track_header: Rect,
+    track_col_offsets: TrackColumnOffsets,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TrackColumnOffsets {
+    title_start: u16,
+    time_start: u16,
+    artist_start: u16,
+    quality_start: u16,
+    end: u16,
 }
 
 pub fn run_interactive(
@@ -1159,12 +1272,14 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
         ])
         .split(cols[1]);
 
-    let (_, library_rows_area) = library_panel_inner_areas(right_sections[2]);
+    let (header_area, library_rows_area) = library_panel_inner_areas(right_sections[2]);
     let areas = RenderAreas {
         roots: PaneArea::bordered(left_sections[0], 1),
         browse: left_sections[2],
         playlists: PaneArea::bordered(left_sections[4], 1),
         tracks: PaneArea::from_list_area(right_sections[2], library_rows_area, 1),
+        track_header: header_area,
+        track_col_offsets: TrackColumnOffsets::default(),
     };
     state.sync_scroll_offsets(&areas);
 
@@ -1172,7 +1287,9 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
     render_browse_modes(frame, left_sections[2], state, palette);
     render_playlists(frame, left_sections[4], state, palette);
     render_now_playing(frame, right_sections[0], state, palette);
-    render_tracks(frame, right_sections[2], state, palette);
+    let col_offsets = render_tracks(frame, right_sections[2], state, palette);
+    // Can't mutate areas after sync_scroll_offsets borrow, so we rebuild with col_offsets
+    let areas = RenderAreas { track_col_offsets: col_offsets, ..areas };
     render_status(frame, footer, state, palette);
 
     if state.show_help {
@@ -1328,7 +1445,7 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palet
     frame.render_stateful_widget(list, content_area, &mut list_state);
 }
 
-fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
+fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) -> TrackColumnOffsets {
     let title = if state.track_filter_query.is_empty() {
         format!("Library ({})", state.filtered_track_count())
     } else {
@@ -1344,7 +1461,7 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
     frame.render_widget(outer_block, area);
 
     if inner.width == 0 || inner.height == 0 {
-        return;
+        return TrackColumnOffsets::default();
     }
 
     let (header_area, rows_area) = library_panel_inner_areas(area);
@@ -1360,19 +1477,49 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
     let col_title = flexible * 45 / 100;
     let col_artist = flexible.saturating_sub(col_title);
 
+    let header_x = inner.x;
+    let offsets = TrackColumnOffsets {
+        title_start: header_x + col_icon as u16,
+        time_start: header_x + (col_icon + col_title) as u16,
+        artist_start: header_x + (col_icon + col_title + col_time) as u16,
+        quality_start: header_x + (col_icon + col_title + col_time + col_artist + col_fav) as u16,
+        end: header_x + total_w as u16,
+    };
+
+    let sort_indicator = |col: SortColumn| -> &str {
+        if state.sort_column == col {
+            if state.sort_ascending { " ▲" } else { " ▼" }
+        } else {
+            ""
+        }
+    };
+    let sort_style = |col: SortColumn| -> Style {
+        if state.sort_column == col {
+            Style::default().fg(palette.accent)
+        } else {
+            Style::default().fg(palette.text_muted)
+        }
+    };
+
     let header = Line::from(vec![
         Span::styled(pad_cell("", col_icon), Style::default().fg(palette.text_muted)),
         Span::styled(
-            pad_cell("Title", col_title),
-            Style::default().fg(palette.text_muted),
+            pad_cell(&format!("Title{}", sort_indicator(SortColumn::Title)), col_title),
+            sort_style(SortColumn::Title),
         ),
-        Span::styled(pad_cell("Time", col_time), Style::default().fg(palette.text_muted)),
         Span::styled(
-            pad_cell("Artist", col_artist),
-            Style::default().fg(palette.text_muted),
+            pad_cell(&format!("Time{}", sort_indicator(SortColumn::Time)), col_time),
+            sort_style(SortColumn::Time),
+        ),
+        Span::styled(
+            pad_cell(&format!("Artist{}", sort_indicator(SortColumn::Artist)), col_artist),
+            sort_style(SortColumn::Artist),
         ),
         Span::styled(pad_cell("Fav", col_fav), Style::default().fg(palette.text_muted)),
-        Span::styled("Quality", Style::default().fg(palette.text_muted)),
+        Span::styled(
+            format!("Quality{}", sort_indicator(SortColumn::Quality)),
+            sort_style(SortColumn::Quality),
+        ),
     ]);
     frame.render_widget(Paragraph::new(header), header_area);
 
@@ -1454,6 +1601,7 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
     let mut list_state = ListState::default().with_selected(selected);
     list_state = list_state.with_offset(state.tracks_scroll);
     frame.render_stateful_widget(list, rows_area, &mut list_state);
+    offsets
 }
 
 fn render_now_playing(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
@@ -1630,6 +1778,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
         Line::from("n / N: next / previous track"),
         Line::from("+ / -: volume up / down"),
         Line::from("s: toggle shuffle"),
+        Line::from("o: cycle sort column (click header to sort)"),
         Line::from("a: add music folder"),
         Line::from("j/k or arrows: move selection"),
         Line::from("PgUp/PgDn: page movement"),
@@ -2189,6 +2338,8 @@ mod tests {
             browse: Rect::new(0, 16, 20, 8),
             playlists: PaneArea::bordered(Rect::new(0, 8, 20, 8), 1),
             tracks: PaneArea::bordered(Rect::new(20, 0, 40, 8), 1),
+            track_header: Rect::new(20, 0, 40, 1),
+            track_col_offsets: TrackColumnOffsets::default(),
         };
         state.sync_scroll_offsets(&areas);
 
