@@ -1897,13 +1897,22 @@ fn format_tech_compact(
     bit_depth: Option<i64>,
     channels: Option<i64>,
 ) -> String {
-    let sr_khz = sample_rate.unwrap_or_default() / 1000;
+    let sr = sample_rate.unwrap_or_default();
     let bd = bit_depth.unwrap_or_default();
     let ch = channels.unwrap_or_default();
-    if sr_khz > 0 && bd > 0 {
-        format!("{bd}b/{sr_khz}k {ch}ch")
+    let sr_khz = sr / 1000;
+    let sr_rem = (sr % 1000) / 100;
+    let sr_str = if sr_khz > 0 && sr_rem > 0 {
+        format!("{sr_khz}.{sr_rem}k")
+    } else if sr_khz > 0 {
+        format!("{sr_khz}k")
     } else {
-        format!("{}Hz {}ch {}bit", sample_rate.unwrap_or(0), ch, bd)
+        format!("{sr}Hz")
+    };
+    if bd > 0 {
+        format!("{bd}b/{sr_str} {ch}ch")
+    } else {
+        format!("{sr_str} {ch}ch")
     }
 }
 
