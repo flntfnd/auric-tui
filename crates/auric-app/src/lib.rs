@@ -1978,9 +1978,10 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                 let app_ref = app_cell.borrow();
                 app_ref.config.library.clone()
             };
-            let db_path = {
+            let db_options = {
                 let app_ref = app_cell.borrow();
-                app_ref.db.path().unwrap_or(Path::new("")).to_path_buf()
+                let cwd = env::current_dir().unwrap_or_default();
+                app_ref.config.database.to_options(&cwd).unwrap_or_default()
             };
             run_interactive_full(
                 &mut state,
@@ -2001,21 +2002,38 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                 },
                 {
                     let lib_config = lib_config.clone();
-                    let db_path = db_path.clone();
+                    let db_options = db_options.clone();
                     move |scan_path: String| {
                         let (tx, rx) = std::sync::mpsc::channel();
                         let lib_config = lib_config.clone();
-                        let db_path = db_path.clone();
+                        let db_options = db_options.clone();
                         std::thread::spawn(move || {
+                            // Count files first for progress
+                            let scan_path_ref = scan_path.clone();
+                            let count_tx = tx.clone();
+                            let count_path = scan_path.clone();
+                            std::thread::spawn(move || {
+                                let mut count = 0usize;
+                                let walker = walkdir::WalkDir::new(&count_path);
+                                for entry in walker.into_iter().filter_map(|e| e.ok()) {
+                                    if entry.file_type().is_file() {
+                                        count += 1;
+                                        if count % 500 == 0 {
+                                            let _ = count_tx.send(ScanProgress::Progress {
+                                                discovered: count,
+                                                path: count_path.clone(),
+                                            });
+                                        }
+                                    }
+                                }
+                            });
+
                             let scan_result = (|| -> anyhow::Result<ScanSummary> {
-                                let mut db = Database::open(&DatabaseOptions {
-                                    path: db_path,
-                                    ..DatabaseOptions::default()
-                                })?;
+                                let mut db = Database::open(&db_options)?;
                                 let scanner = scanner_from_config(&lib_config, false);
                                 let summary = scanner.scan_path(
                                     &mut db,
-                                    std::path::Path::new(&scan_path),
+                                    std::path::Path::new(&scan_path_ref),
                                 )?;
                                 Ok(summary)
                             })();
@@ -2023,10 +2041,10 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                 Ok(summary) => {
                                     let _ = tx.send(ScanProgress::Done {
                                         message: format!(
-                                            "Scan complete: {} (imported {} tracks in {}ms)",
+                                            "Scan complete: {} ({} tracks imported in {:.1}s)",
                                             summary.root_path,
                                             summary.imported_tracks,
-                                            summary.elapsed_ms,
+                                            summary.elapsed_ms as f64 / 1000.0,
                                         ),
                                     });
                                 }

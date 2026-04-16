@@ -19,6 +19,7 @@ auric-audio = { path = "../auric-audio" }
 auric-core = { path = "../auric-core" }
 auric-library = { path = "../auric-library" }
 auric-ui = { path = "../auric-ui" }
+walkdir.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
