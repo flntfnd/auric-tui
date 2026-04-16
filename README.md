@@ -4,34 +4,13 @@ A cross-platform terminal audio player built in Rust. Designed to feel like a se
 
 Auric targets high-resolution and lossless playback, capability-aware terminal rendering, and modular features that can be toggled at runtime.
 
-```
-+---------------------+-------------------------------+---------------------+
-| Library             | Tracks                        | Now Playing         |
-|                     |                               |                     |
-| > Roots             |  # | Title       | Artist    | Track Title         |
-|   /music/flac       |  1 | Intro       | Artist A  | Artist - Album      |
-|   /music/vinyl-rips |  2 | Deep Cut    | Artist B  |                     |
-|                     |  3 | Closer      | Artist A  | 00:00 ====---- 4:32 |
-| > Browse            |  4 | Interlude   | Artist C  |                     |
-|   All Tracks        |  5 | Opener      | Artist D  | |||||||||||||||      |
-|   Albums            |                               |                     |
-|   Artists            |                               |                     |
-|                     |                               |                     |
-| > Playlists         |                               |                     |
-|   Road Trip         |                               |                     |
-|   Late Night        |                               |                     |
-+---------------------+-------------------------------+---------------------+
-| > Playing | FLAC 96kHz/24bit | Vol: 100% | Watched: 2 roots              |
-+---------------------+-------------------------------+---------------------+
-```
-
 ## Features
 
 **Playback**
 - FLAC, WAV, MP3, AAC, OGG Vorbis, ALAC, ADPCM, MKV/WebM audio via Symphonia
-- Device enumeration and output via cpal
+- Lock-free audio output via cpal with automatic sample rate conversion and mono/stereo upmixing
 - Queue management with repeat modes (off, one, all) and shuffle
-- Volume control and playback transport (play, pause, stop, seek, next, previous)
+- Volume control and playback transport (play, pause, stop, next, previous)
 - Session state persisted across restarts
 
 **Library**
@@ -40,14 +19,27 @@ Auric targets high-resolution and lossless playback, capability-aware terminal r
 - Watched folders with filesystem event debouncing and incremental rescan
 - Playlist CRUD with track ordering
 - SQLite persistence with WAL mode and batch operations
+- Browse by artist, album, or all songs with miller-column navigation
 
 **Terminal UI**
-- Three-pane layout: library browser, track list, now playing
+- Multi-pane layout: library roots, browse modes, track list, now playing with artwork
+- Album art display with auto-detected graphics protocol (Kitty, Sixel, iTerm2, halfblocks)
+- Pixel art mode for chunky retro artwork rendering
+- Real-time braille-dot spectrum visualizer driven by FFT
+- Interactive seek bar with mouse click-to-seek
+- Column sorting (click headers or press `o` to cycle)
+- Double-click to play tracks
+- Drag-and-drop folder adding (supported terminals)
+- First-run welcome wizard for adding music
+- Settings panel for live configuration changes
+- Track info panel with artwork and full metadata
 - Keyboard navigation (vim-style + arrows), mouse support, focus cycling
 - Command palette with inline parameter input
 - Track search/filter within the current view
+- Rounded borders with polished focus indicators
+- Animated transitions on track changes via tachyonfx
 - Icon modes: Nerd Font glyphs with ASCII fallback
-- Token-based theming (dark and light themes included)
+- Token-based theming with terminal-native background support
 
 **Modular Features**
 - 11 runtime feature toggles: metadata, artwork, remote metadata, watched folders, equalizer, visualizer, analytics, P2P sync, P2P stream, mouse, image artwork
@@ -138,63 +130,13 @@ The binary is at `target/release/auric` (or `target\release\auric.exe` on Window
 
 Pre-built binaries are available on the [Releases](https://github.com/flntfnd/auric-tui/releases) page.
 
-**macOS:**
-
-```sh
-# Apple Silicon
-curl -L https://github.com/flntfnd/auric-tui/releases/latest/download/auric-aarch64-apple-darwin.tar.gz | tar xz
-sudo mv auric /usr/local/bin/
-
-# Intel
-curl -L https://github.com/flntfnd/auric-tui/releases/latest/download/auric-x86_64-apple-darwin.tar.gz | tar xz
-sudo mv auric /usr/local/bin/
-```
-
-**Linux:**
-
-```sh
-curl -L https://github.com/flntfnd/auric-tui/releases/latest/download/auric-x86_64-unknown-linux-gnu.tar.gz | tar xz
-sudo mv auric /usr/local/bin/
-```
-
-**Windows (PowerShell):**
-
-```powershell
-Invoke-WebRequest -Uri https://github.com/flntfnd/auric-tui/releases/latest/download/auric-x86_64-pc-windows-msvc.zip -OutFile auric.zip
-Expand-Archive auric.zip -DestinationPath .
-Move-Item auric.exe "$env:USERPROFILE\.cargo\bin\auric.exe"
-```
-
 ## Quick start
 
 ```sh
-# Add a music directory
-auric root add /path/to/music
-
-# Scan it
-auric scan
-
-# Launch the TUI
-auric ui
+auric
 ```
 
-## Usage
-
-```
-auric <command> [args]
-
-Commands:
-  root       Manage library roots (list, add <path>)
-  scan       Scan library roots for audio files
-  watch      Watch library roots for filesystem changes
-  track      Query tracks (list, get, search)
-  playlist   Manage playlists (list, create, rename, delete, tracks, add, remove, clear, load)
-  playback   Playback transport (status, play, pause, stop, next, prev, seek, volume, repeat, shuffle, queue)
-  audio      Audio device info (devices, inspect <path>)
-  artwork    Artwork cache info (stats, lookup, list)
-  feature    Feature toggles (list, enable, disable)
-  ui         Launch the interactive TUI
-```
+On first launch with an empty library, a welcome panel appears. Press `a` at any time to add a music folder. Tracks are scanned and imported automatically.
 
 ## Keyboard shortcuts
 
@@ -202,94 +144,55 @@ Commands:
 
 | Key | Action |
 |-----|--------|
-| `Space` | Play / pause |
-| `s` | Stop |
-| `]` | Next track |
-| `[` | Previous track |
-| `.` | Seek forward (5s) |
-| `,` | Seek backward (5s) |
-| `>` | Seek forward (30s) |
-| `<` | Seek backward (30s) |
-| `S` | Toggle shuffle |
-| `R` | Cycle repeat mode (off / one / all) |
-
-### Volume
-
-| Key | Action |
-|-----|--------|
-| `=` / `+` | Volume up |
+| `Enter` | Play selected track (queues current view) |
+| `Space` | Play / pause toggle |
+| `n` | Next track |
+| `N` | Previous track |
+| `+` / `=` | Volume up |
 | `-` | Volume down |
-| `m` | Mute / unmute |
+| `s` | Toggle shuffle |
 
 ### Navigation
 
 | Key | Action |
 |-----|--------|
 | `j` / `k` or Up / Down | Move selection |
-| `h` / `l` or Left / Right | Collapse / expand or switch pane context |
+| `h` / `l` or Left / Right | Browse: collapse / expand |
 | `g` | Jump to top |
 | `G` | Jump to bottom |
 | `Page Up` / `Page Down` | Scroll by page |
 | `Tab` / `Shift-Tab` | Cycle focus between panes |
-| `1` | Focus library pane |
-| `2` | Focus tracks pane |
-| `3` | Focus now playing pane |
-| `Enter` | Play selected track / open selected item |
-
-### Search and command palette
-
-| Key | Action |
-|-----|--------|
-| `/` | Search / filter tracks |
-| `:` or `Ctrl-p` | Open command palette |
-| `Esc` | Close search / palette / overlay |
-| `Enter` | Submit search or execute command |
-| `Ctrl-u` | Clear input line |
-
-### Queue
-
-| Key | Action |
-|-----|--------|
-| `a` | Add selected track to queue |
-| `A` | Add selected track as next in queue |
-| `Ctrl-d` | Remove selected track from queue |
-| `Ctrl-x` | Clear entire queue |
 
 ### Library
 
 | Key | Action |
 |-----|--------|
-| `i` | Show track info / metadata |
-| `I` | Identify untagged tracks (when remote metadata enabled) |
-| `r` | Rescan / refresh current context |
-| `Ctrl-r` | Rescan all library roots |
+| `a` | Add music folder |
+| `i` | Track info with artwork |
+| `o` | Cycle sort column |
+| `r` | Refresh library |
+| `/` | Search / filter tracks |
 
-### Playlist
-
-| Key | Action |
-|-----|--------|
-| `p` | Add selected track to playlist |
-| `P` | Create new playlist |
-| `d` | Remove selected item (with confirmation) |
-
-### View
+### UI
 
 | Key | Action |
 |-----|--------|
-| `v` | Toggle visualizer |
-| `e` | Toggle equalizer panel |
-| `n` | Expand / collapse now playing panel |
-| `?` | Toggle help overlay |
-| `t` | Cycle through themes |
-| `F` | Toggle fullscreen focus on current pane |
+| `,` | Open settings |
+| `:` or `Ctrl-p` | Command palette |
+| `?` | Help overlay |
+| `Esc` | Close overlay / modal |
+| `q` or `Ctrl-c` | Quit |
 
-### General
+### Mouse
 
-| Key | Action |
-|-----|--------|
-| `q` | Quit (closes modal first if one is open) |
-| `Ctrl-c` | Force quit |
-| `Ctrl-z` | Suspend to background |
+| Action | Effect |
+|--------|--------|
+| Click track | Select |
+| Double-click track | Play |
+| Click column header | Sort by column |
+| Click seek bar | Seek to position |
+| Scroll wheel | Scroll list |
+| Drag folder onto window | Add as library root |
 
 ## Configuration
 
@@ -297,11 +200,10 @@ Auric reads `config/default.toml` from the working directory. Key sections:
 
 ```toml
 [features]
-metadata = true          # Read embedded tags
-artwork = true           # Extract embedded artwork
-watched_folders = true   # Enable filesystem watching
-visualizer = false       # Audio visualizer (planned)
-mouse = true             # Mouse input support
+metadata = true
+artwork = true
+watched_folders = true
+mouse = true
 
 [library]
 auto_scan_on_start = true
@@ -309,9 +211,12 @@ watch_debounce_ms = 750
 scan_batch_size = 2000
 
 [ui]
-theme = "auric-dark"     # auric-dark | auric-light
-icon_pack = "nerd-font"  # nerd-font | ascii
-refresh_hz = 30
+theme = "auric-dark"
+color_scheme = "dark"
+icon_pack = "nerd-font"
+use_theme_background = false
+pixel_art_artwork = false
+pixel_art_cell_size = 2
 
 [database]
 path = "var/auric.db"
@@ -330,35 +235,43 @@ surface_0 = "#0f1115"
 surface_1 = "#171a21"
 text = "#e8ecf3"
 accent = "#4fd1c5"
+border_focused = "#90cdf4"
+border_unfocused = "#1e2736"
 visualizer_low = "#63b3ed"
 visualizer_mid = "#4fd1c5"
 visualizer_high = "#f6ad55"
-
-[layout]
-padding_x = 1
-
-[motion]
-tick_ms = 33
 ```
+
+By default, auric uses your terminal's background color. Set `use_theme_background = true` in the `[ui]` section to use the theme's background instead.
 
 ## Terminal font
 
-Auric targets **FiraCode Nerd Font Mono** for icon support. Configure this in your terminal emulator. If Nerd Font glyphs are unavailable, set `icon_pack = "ascii"` in your config or toggle via the feature system.
+Auric targets **FiraCode Nerd Font Mono** for icon support. Configure this in your terminal emulator. If Nerd Font glyphs are unavailable, set `icon_pack = "ascii"` in settings (press `,`) or in your config file.
+
+## Album art
+
+Auric auto-detects your terminal's graphics protocol and renders album artwork using the best available method:
+
+1. Kitty graphics protocol
+2. Sixel
+3. iTerm2 inline images
+4. Halfblock characters (universal fallback)
+
+Enable pixel art mode in settings for a chunky retro look.
 
 ## Architecture
 
-Six workspace crates with clear boundaries:
+Seven workspace crates with clear boundaries:
 
 | Crate | Role |
 |-------|------|
 | `auric-core` | Shared types, feature registry, event contracts |
-| `auric-audio` | Playback engine, decoder/output backends, DSP chain |
+| `auric-audio` | Playback engine with lock-free output, symphonia decoding, cpal output |
 | `auric-library` | Library scan/watch, playlists, SQLite persistence |
-| `auric-ui` | TUI rendering, input handling, theming |
+| `auric-drift` | Intelligent shuffle algorithm and audio feature analyzer |
+| `auric-ui` | TUI rendering, input handling, theming, visualizer, artwork |
 | `auric-net` | Listen-along sync and P2P streaming interfaces (planned) |
 | `auric-app` | Composition root, CLI, bootstrap |
-
-See `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and `docs/UX.md` for detailed design documentation.
 
 ## Supported formats
 
@@ -375,12 +288,6 @@ Via Symphonia (pure Rust, no system dependencies):
 | ADPCM | .wav |
 | Opus | .ogg, .webm |
 | Audio in MKV/WebM | .mkv, .webm |
-
-## Status
-
-Phase 0/1. Local playback, library management, and TUI are functional. Playback engine is wired for device enumeration and format inspection. Stream output is next.
-
-See the [Roadmap](docs/ROADMAP.md) for planned phases including metadata enrichment, DSP/visualizer, analytics, and P2P social listening.
 
 ## License
 
