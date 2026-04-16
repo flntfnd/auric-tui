@@ -2,7 +2,16 @@ use crate::theme::Palette;
 use ratatui::prelude::*;
 use ratatui::widgets::Widget;
 
-const BAR_STRS: [&str; 8] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "█"];
+/// Braille dot positions within a 2x4 cell:
+/// (0,0)=0x01  (1,0)=0x08
+/// (0,1)=0x02  (1,1)=0x10
+/// (0,2)=0x04  (1,2)=0x20
+/// (0,3)=0x40  (1,3)=0x80
+const BRAILLE_BASE: u32 = 0x2800;
+const DOT_MAP: [[u8; 4]; 2] = [
+    [0x01, 0x02, 0x04, 0x40],
+    [0x08, 0x10, 0x20, 0x80],
+];
 
 pub struct SpectrumWidget<'a> {
     pub bands: &'a [f32],
@@ -11,48 +20,74 @@ pub struct SpectrumWidget<'a> {
 
 impl<'a> Widget for SpectrumWidget<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        if area.width < 4 || area.height < 1 || self.bands.is_empty() {
+        if area.width < 2 || area.height < 1 || self.bands.is_empty() {
             return;
         }
-        let num_bands = self.bands.len().min(area.width as usize);
-        let bar_width = (area.width as usize / num_bands).max(1);
 
-        for (i, &magnitude) in self.bands.iter().take(num_bands).enumerate() {
-            let x = area.x + (i * bar_width) as u16;
-            if x >= area.x + area.width {
-                break;
+        // Each terminal cell = 2 dots wide, 4 dots tall
+        let dot_cols = area.width as usize * 2;
+        let dot_rows = area.height as usize * 4;
+        let num_bands = self.bands.len();
+
+        // Map bands to dot columns with spacing:
+        // each band gets some dot columns, with a 1-dot gap between bands
+        let total_gaps = num_bands.saturating_sub(1);
+        let usable_cols = dot_cols.saturating_sub(total_gaps);
+        let band_dot_width = (usable_cols / num_bands).max(1);
+
+        // Build a dot grid
+        let mut dots = vec![false; dot_cols * dot_rows];
+
+        for (i, &magnitude) in self.bands.iter().enumerate() {
+            let col_start = i * (band_dot_width + 1); // +1 for gap
+            let fill_dots = (magnitude.clamp(0.0, 1.0) * dot_rows as f32).round() as usize;
+
+            for dc in 0..band_dot_width {
+                let col = col_start + dc;
+                if col >= dot_cols {
+                    break;
+                }
+                for dr in 0..fill_dots {
+                    let row = dot_rows - 1 - dr;
+                    dots[row * dot_cols + col] = true;
+                }
             }
-            let color = if i < num_bands / 3 {
-                self.palette.visualizer_low
-            } else if i < 2 * num_bands / 3 {
-                self.palette.visualizer_mid
-            } else {
-                self.palette.visualizer_high
-            };
+        }
 
-            let max_h = area.height as f32;
-            let fill_h = (magnitude.clamp(0.0, 1.0) * max_h).round();
+        // Render dot grid as braille characters
+        for cy in 0..area.height as usize {
+            for cx in 0..area.width as usize {
+                let mut pattern: u8 = 0;
+                for dx in 0..2 {
+                    for dy in 0..4 {
+                        let dot_col = cx * 2 + dx;
+                        let dot_row = cy * 4 + dy;
+                        if dot_col < dot_cols
+                            && dot_row < dot_rows
+                            && dots[dot_row * dot_cols + dot_col]
+                        {
+                            pattern |= DOT_MAP[dx][dy];
+                        }
+                    }
+                }
 
-            for row in 0..area.height {
-                let y = area.y + area.height - 1 - row;
-                let row_f = row as f32;
-                let char_idx = if row_f + 1.0 <= fill_h {
-                    7
-                } else if row_f < fill_h {
-                    let frac = fill_h - row_f;
-                    (frac * 7.0).clamp(0.0, 7.0) as usize
-                } else {
-                    0
-                };
-                if char_idx != 0 {
-                    let s = BAR_STRS[char_idx];
-                    for dx in 0..bar_width.min((area.x + area.width - x) as usize) {
-                        buf.set_string(
-                            x + dx as u16,
-                            y,
-                            s,
-                            Style::default().fg(color),
-                        );
+                if pattern != 0 {
+                    let ch = char::from_u32(BRAILLE_BASE + pattern as u32).unwrap_or(' ');
+                    // Color based on horizontal position (low/mid/high frequency)
+                    let band_idx = cx * 2 * num_bands / dot_cols.max(1);
+                    let color = if band_idx < num_bands / 3 {
+                        self.palette.visualizer_low
+                    } else if band_idx < 2 * num_bands / 3 {
+                        self.palette.visualizer_mid
+                    } else {
+                        self.palette.visualizer_high
+                    };
+
+                    let x = area.x + cx as u16;
+                    let y = area.y + cy as u16;
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_char(ch);
+                        cell.set_fg(color);
                     }
                 }
             }
@@ -71,7 +106,6 @@ pub fn analyze_spectrum(samples: &[f32], num_bands: usize) -> Vec<f32> {
     let mut bands = vec![0.0f32; num_bands];
 
     for (band_idx, magnitude) in bands.iter_mut().enumerate() {
-        // Log-scale frequency mapping: 20 Hz to 16 kHz
         let freq_lo = 20.0 * (16000.0f32 / 20.0).powf(band_idx as f32 / num_bands as f32);
         let freq_hi =
             20.0 * (16000.0f32 / 20.0).powf((band_idx + 1) as f32 / num_bands as f32);
