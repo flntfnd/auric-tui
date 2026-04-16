@@ -1349,22 +1349,29 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
 
     let (header_area, rows_area) = library_panel_inner_areas(area);
 
+    // Calculate column widths proportionally
+    let total_w = inner.width as usize;
+    let col_icon = 4usize;
+    let col_time = 7;
+    let col_fav = 4;
+    let col_quality = 14;
+    let fixed = col_icon + col_time + col_fav + col_quality;
+    let flexible = total_w.saturating_sub(fixed);
+    let col_title = flexible * 45 / 100;
+    let col_artist = flexible.saturating_sub(col_title);
+
     let header = Line::from(vec![
-        Span::styled(pad_cell("Art", 4), Style::default().fg(palette.text_muted)),
+        Span::styled(pad_cell("", col_icon), Style::default().fg(palette.text_muted)),
         Span::styled(
-            pad_cell("Song Title", 22),
+            pad_cell("Title", col_title),
             Style::default().fg(palette.text_muted),
         ),
-        Span::styled(pad_cell("Time", 7), Style::default().fg(palette.text_muted)),
+        Span::styled(pad_cell("Time", col_time), Style::default().fg(palette.text_muted)),
         Span::styled(
-            pad_cell("Artist", 16),
+            pad_cell("Artist", col_artist),
             Style::default().fg(palette.text_muted),
         ),
-        Span::styled(
-            pad_cell("Genre", 10),
-            Style::default().fg(palette.text_muted),
-        ),
-        Span::styled(pad_cell("Fav", 6), Style::default().fg(palette.text_muted)),
+        Span::styled(pad_cell("Fav", col_fav), Style::default().fg(palette.text_muted)),
         Span::styled("Quality", Style::default().fg(palette.text_muted)),
     ]);
     frame.render_widget(Paragraph::new(header), header_area);
@@ -1412,13 +1419,12 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
             .map(|t| {
                 let icon = icon_glyph(state.snapshot.icon_mode, IconToken::Track);
                 let row = format!(
-                    "{} {}{}{}{}{}{}",
-                    pad_cell(icon, 3),
-                    pad_cell(&truncate_text(&t.title, 21), 22),
-                    pad_cell(&format_duration_short(t.duration_ms), 7),
-                    pad_cell(&truncate_text(&t.artist, 15), 16),
-                    pad_cell("-", 10),
-                    pad_cell("☆", 6),
+                    "{} {}{}{}{}{}",
+                    pad_cell(icon, col_icon.saturating_sub(1)),
+                    pad_cell(&truncate_text(&t.title, col_title.saturating_sub(1)), col_title),
+                    pad_cell(&format_duration_short(t.duration_ms), col_time),
+                    pad_cell(&truncate_text(&t.artist, col_artist.saturating_sub(1)), col_artist),
+                    pad_cell("☆", col_fav),
                     format_tech_compact(t.sample_rate, t.bit_depth, t.channels)
                 );
                 ListItem::new(Line::from(Span::styled(
