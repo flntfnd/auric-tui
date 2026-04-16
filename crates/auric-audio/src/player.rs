@@ -45,6 +45,7 @@ pub struct PlayerHandle {
     cmd_tx: mpsc::Sender<PlayerCommand>,
     event_rx: Mutex<mpsc::Receiver<PlayerEvent>>,
     thread: Option<thread::JoinHandle<()>>,
+    viz_buf: Arc<Mutex<Vec<f32>>>,
 }
 
 impl PlayerHandle {
@@ -52,15 +53,19 @@ impl PlayerHandle {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
 
+        let viz_buf = Arc::new(Mutex::new(Vec::new()));
+        let viz_buf_clone = Arc::clone(&viz_buf);
+
         let thread = thread::Builder::new()
             .name("auric-player".into())
-            .spawn(move || player_thread(cmd_rx, event_tx))
+            .spawn(move || player_thread(cmd_rx, event_tx, viz_buf_clone))
             .expect("failed to spawn player thread");
 
         Self {
             cmd_tx,
             event_rx: Mutex::new(event_rx),
             thread: Some(thread),
+            viz_buf,
         }
     }
 
@@ -94,6 +99,16 @@ impl PlayerHandle {
         }
         events
     }
+
+    pub fn peek_visualization_samples(&self, count: usize) -> Vec<f32> {
+        self.viz_buf
+            .lock()
+            .map(|buf| {
+                let start = buf.len().saturating_sub(count);
+                buf[start..].to_vec()
+            })
+            .unwrap_or_default()
+    }
 }
 
 impl Drop for PlayerHandle {
@@ -105,7 +120,11 @@ impl Drop for PlayerHandle {
     }
 }
 
-fn player_thread(cmd_rx: mpsc::Receiver<PlayerCommand>, event_tx: mpsc::Sender<PlayerEvent>) {
+fn player_thread(
+    cmd_rx: mpsc::Receiver<PlayerCommand>,
+    event_tx: mpsc::Sender<PlayerEvent>,
+    viz_buf: Arc<Mutex<Vec<f32>>>,
+) {
     let volume = Arc::new(AtomicU32::new(f32::to_bits(1.0)));
 
     loop {
@@ -117,7 +136,7 @@ fn player_thread(cmd_rx: mpsc::Receiver<PlayerCommand>, event_tx: mpsc::Sender<P
 
         match cmd {
             PlayerCommand::Load { path } => {
-                play_track(&path, &cmd_rx, &event_tx, &volume);
+                play_track(&path, &cmd_rx, &event_tx, &volume, &viz_buf);
             }
             PlayerCommand::SetVolume { volume: v } => {
                 volume.store(v.to_bits(), Ordering::Relaxed);
@@ -134,6 +153,7 @@ fn play_track(
     cmd_rx: &mpsc::Receiver<PlayerCommand>,
     event_tx: &mpsc::Sender<PlayerEvent>,
     volume: &Arc<AtomicU32>,
+    viz_buf: &Arc<Mutex<Vec<f32>>>,
 ) {
     let file = match File::open(path) {
         Ok(f) => f,
@@ -305,7 +325,7 @@ fn play_track(
                 Ok(PlayerCommand::Load { path: new_path }) => {
                     // Recurse into playing a new track
                     drop(stream);
-                    play_track(&new_path, cmd_rx, event_tx, volume);
+                    play_track(&new_path, cmd_rx, event_tx, volume, viz_buf);
                     return;
                 }
                 Ok(PlayerCommand::SetVolume { volume: v }) => {
@@ -333,7 +353,7 @@ fn play_track(
             }
             Ok(PlayerCommand::Load { path: new_path }) => {
                 drop(stream);
-                play_track(&new_path, cmd_rx, event_tx, volume);
+                play_track(&new_path, cmd_rx, event_tx, volume, viz_buf);
                 return;
             }
             Ok(PlayerCommand::SetVolume { volume: v }) => {
@@ -412,6 +432,16 @@ fn play_track(
         {
             let mut buf = buffer.lock().expect("audio buffer lock poisoned");
             buf.extend(samples);
+        }
+
+        // Store latest samples for visualization
+        if let Ok(mut vb) = viz_buf.lock() {
+            vb.clear();
+            vb.extend_from_slice(samples);
+            if vb.len() > 2048 {
+                let start = vb.len() - 2048;
+                *vb = vb[start..].to_vec();
+            }
         }
 
         // Send position updates roughly every 250ms

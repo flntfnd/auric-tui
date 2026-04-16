@@ -146,6 +146,7 @@ pub struct ShellState {
     pub browse: crate::browse::BrowseState,
     browse_filter_artist: Option<String>,
     browse_filter_album: Option<String>,
+    pub spectrum_bands: Vec<f32>,
 }
 
 impl ShellState {
@@ -179,6 +180,7 @@ impl ShellState {
             browse: crate::browse::BrowseState::new(),
             browse_filter_artist: None,
             browse_filter_album: None,
+            spectrum_bands: vec![0.0; 32],
         };
         state.rebuild_track_filter();
         // Auto-trigger welcome panel on empty library
@@ -919,6 +921,7 @@ pub struct PlayerEventUpdate {
     pub duration_ms: u64,
     pub status: String,
     pub track_finished: bool,
+    pub spectrum_bands: Vec<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1258,6 +1261,9 @@ fn run_loop(
                 if update.position_ms > 0 || update.duration_ms > 0 {
                     state.playback_position_ms = update.position_ms;
                     state.playback_duration_ms = update.duration_ms;
+                }
+                if !update.spectrum_bands.is_empty() {
+                    state.spectrum_bands = update.spectrum_bands;
                 }
                 if update.track_finished {
                     // Auto-advance to next track
@@ -1969,6 +1975,29 @@ fn render_now_playing(frame: &mut Frame, area: Rect, state: &mut ShellState, pal
             height: 1,
         };
         frame.render_widget(Paragraph::new(info_line), info_area);
+
+        // Spectrum visualizer: fills remaining height below the three fixed rows
+        let viz_top = text_area.y + 3;
+        let viz_bottom = text_area.y + text_area.height;
+        if is_playing
+            && !state.spectrum_bands.is_empty()
+            && viz_bottom > viz_top
+            && text_area.width >= 4
+        {
+            let viz_area = Rect {
+                x: text_area.x,
+                y: viz_top,
+                width: text_area.width,
+                height: viz_bottom - viz_top,
+            };
+            frame.render_widget(
+                crate::visualizer::SpectrumWidget {
+                    bands: &state.spectrum_bands.clone(),
+                    palette,
+                },
+                viz_area,
+            );
+        }
 
         // Render album artwork on the left
         if show_art {

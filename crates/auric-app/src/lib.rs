@@ -2096,18 +2096,26 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                             auric_audio::player::PlayerEvent::Position {
                                 position_ms,
                                 duration_ms,
-                            } => Some(PlayerEventUpdate {
-                                position_ms,
-                                duration_ms,
-                                status: "playing".to_string(),
-                                track_finished: false,
-                            }),
+                            } => {
+                                let samples =
+                                    app_ref.player.peek_visualization_samples(1024);
+                                let bands =
+                                    auric_ui::visualizer::analyze_spectrum(&samples, 32);
+                                Some(PlayerEventUpdate {
+                                    position_ms,
+                                    duration_ms,
+                                    status: "playing".to_string(),
+                                    track_finished: false,
+                                    spectrum_bands: bands,
+                                })
+                            }
                             auric_audio::player::PlayerEvent::TrackFinished => {
                                 Some(PlayerEventUpdate {
                                     position_ms: 0,
                                     duration_ms: 0,
                                     status: "stopped".to_string(),
                                     track_finished: true,
+                                    spectrum_bands: Vec::new(),
                                 })
                             }
                             auric_audio::player::PlayerEvent::Paused => {
@@ -2116,6 +2124,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                     duration_ms: 0,
                                     status: "paused".to_string(),
                                     track_finished: false,
+                                    spectrum_bands: Vec::new(),
                                 })
                             }
                             auric_audio::player::PlayerEvent::Stopped => {
@@ -2124,6 +2133,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                     duration_ms: 0,
                                     status: "stopped".to_string(),
                                     track_finished: false,
+                                    spectrum_bands: Vec::new(),
                                 })
                             }
                             _ => None,
