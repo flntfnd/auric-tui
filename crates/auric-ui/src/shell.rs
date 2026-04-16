@@ -636,7 +636,7 @@ impl ShellState {
                 browser.go_up();
             }
             KeyCode::Char(' ') => {
-                let path = browser.current_dir().to_string_lossy().into_owned();
+                let path = browser.selected_path().to_string_lossy().into_owned();
                 self.file_browser = None;
                 self.input_mode = InputMode::Normal;
                 return KeyAction::CommandSubmitted(format!("__add_root {path}"));
