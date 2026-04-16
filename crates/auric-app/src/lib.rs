@@ -212,7 +212,6 @@ pub struct BootstrapReport {
     pub ui_icon_pack: String,
 }
 
-#[derive(Debug)]
 pub struct BootstrappedApp {
     pub config: AppConfig,
     pub db: Database,
@@ -220,6 +219,18 @@ pub struct BootstrappedApp {
     pub playback_state: PlaybackState,
     pub report: BootstrapReport,
     pub player: auric_audio::player::PlayerHandle,
+    artwork_cache: std::cell::RefCell<(String, Option<Vec<u8>>)>,
+}
+
+impl std::fmt::Debug for BootstrappedApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BootstrappedApp")
+            .field("config", &self.config)
+            .field("feature_registry", &self.feature_registry)
+            .field("playback_state", &self.playback_state)
+            .field("report", &self.report)
+            .finish_non_exhaustive()
+    }
 }
 
 pub fn bootstrap_from_config_path(config_path: &Path) -> Result<BootstrappedApp> {
@@ -261,6 +272,7 @@ pub fn bootstrap_from_config_path(config_path: &Path) -> Result<BootstrappedApp>
         playback_state,
         report,
         player,
+        artwork_cache: std::cell::RefCell::new((String::new(), None)),
     })
 }
 
@@ -2037,7 +2049,7 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                 while !progress_done.load(
                                     std::sync::atomic::Ordering::Relaxed,
                                 ) {
-                                    std::thread::sleep(std::time::Duration::from_millis(750));
+                                    std::thread::sleep(Duration::from_millis(750));
                                     if let Some(ref db) = db {
                                         let count = db.stats().map(|s| s.track_count).unwrap_or(0);
                                         let _ = progress_tx.send(ScanProgress::Progress {
@@ -2572,7 +2584,15 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
         now_playing_artwork: app
             .playback_state
             .current_entry()
-            .and_then(|e| app.db.get_artwork_data_for_track(&e.path).ok().flatten()),
+            .and_then(|e| {
+                let mut cache = app.artwork_cache.borrow_mut();
+                if cache.0 == e.path {
+                    return cache.1.clone();
+                }
+                let data = app.db.get_artwork_data_for_track(&e.path).ok().flatten();
+                *cache = (e.path.clone(), data.clone());
+                data
+            }),
         now_playing_duration_ms: app
             .playback_state
             .current_entry()
