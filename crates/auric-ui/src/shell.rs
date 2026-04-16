@@ -455,6 +455,8 @@ impl ShellState {
                     let co = &areas.track_col_offsets;
                     let col = if x >= co.quality_start {
                         Some(SortColumn::Quality)
+                    } else if x >= co.album_start {
+                        Some(SortColumn::Album)
                     } else if x >= co.artist_start {
                         Some(SortColumn::Artist)
                     } else if x >= co.time_start {
@@ -724,6 +726,7 @@ impl ShellState {
             let cmp = match col {
                 SortColumn::Title => tracks[a].title.to_ascii_lowercase().cmp(&tracks[b].title.to_ascii_lowercase()),
                 SortColumn::Artist => tracks[a].artist.to_ascii_lowercase().cmp(&tracks[b].artist.to_ascii_lowercase()),
+                SortColumn::Album => tracks[a].album.to_ascii_lowercase().cmp(&tracks[b].album.to_ascii_lowercase()),
                 SortColumn::Time => tracks[a].duration_ms.cmp(&tracks[b].duration_ms),
                 SortColumn::Quality => tracks[a].sample_rate.cmp(&tracks[b].sample_rate),
             };
@@ -921,6 +924,7 @@ pub enum SortColumn {
     Title,
     Time,
     Artist,
+    Album,
     Quality,
 }
 
@@ -928,7 +932,8 @@ impl SortColumn {
     fn next(self) -> Self {
         match self {
             Self::Title => Self::Artist,
-            Self::Artist => Self::Time,
+            Self::Artist => Self::Album,
+            Self::Album => Self::Time,
             Self::Time => Self::Quality,
             Self::Quality => Self::Title,
         }
@@ -938,6 +943,7 @@ impl SortColumn {
         match self {
             Self::Title => "Title",
             Self::Artist => "Artist",
+            Self::Album => "Album",
             Self::Time => "Time",
             Self::Quality => "Quality",
         }
@@ -1116,6 +1122,7 @@ struct TrackColumnOffsets {
     title_start: u16,
     time_start: u16,
     artist_start: u16,
+    album_start: u16,
     quality_start: u16,
 }
 
@@ -1871,15 +1878,17 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
     let col_quality = 14;
     let fixed = col_icon + col_time + col_fav + col_quality;
     let flexible = total_w.saturating_sub(fixed);
-    let col_title = flexible * 45 / 100;
-    let col_artist = flexible.saturating_sub(col_title);
+    let col_title = flexible * 30 / 100;
+    let col_artist = flexible * 25 / 100;
+    let col_album = flexible.saturating_sub(col_title + col_artist);
 
     let header_x = inner.x;
     let offsets = TrackColumnOffsets {
         title_start: header_x + col_icon as u16,
         time_start: header_x + (col_icon + col_title) as u16,
         artist_start: header_x + (col_icon + col_title + col_time) as u16,
-        quality_start: header_x + (col_icon + col_title + col_time + col_artist + col_fav) as u16,
+        album_start: header_x + (col_icon + col_title + col_time + col_artist) as u16,
+        quality_start: header_x + (col_icon + col_title + col_time + col_artist + col_album + col_fav) as u16,
     };
 
     let sort_indicator = |col: SortColumn| -> &str {
@@ -1910,6 +1919,10 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
         Span::styled(
             pad_cell(&format!("Artist{}", sort_indicator(SortColumn::Artist)), col_artist),
             sort_style(SortColumn::Artist),
+        ),
+        Span::styled(
+            pad_cell(&format!("Album{}", sort_indicator(SortColumn::Album)), col_album),
+            sort_style(SortColumn::Album),
         ),
         Span::styled(pad_cell("Fav", col_fav), Style::default().fg(palette.text_muted)),
         Span::styled(
@@ -1962,11 +1975,12 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
             .map(|t| {
                 let icon = icon_glyph(state.snapshot.icon_mode, IconToken::Track);
                 let row = format!(
-                    "{} {}{}{}{}{}",
+                    "{} {}{}{}{}{}{}",
                     pad_cell(icon, col_icon.saturating_sub(1)),
                     pad_cell(&truncate_text(&t.title, col_title.saturating_sub(1)), col_title),
                     pad_cell(&format_duration_short(t.duration_ms), col_time),
                     pad_cell(&truncate_text(&t.artist, col_artist.saturating_sub(1)), col_artist),
+                    pad_cell(&truncate_text(&t.album, col_album.saturating_sub(1)), col_album),
                     pad_cell("☆", col_fav),
                     format_tech_compact(t.sample_rate, t.bit_depth, t.channels)
                 );
