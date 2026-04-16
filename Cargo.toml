@@ -31,6 +31,7 @@ walkdir = "2"
 auric-drift = { path = "crates/auric-drift", features = ["serde"] }
 lofty = "0.24.0"
 ratatui = "0.30.0"
+tachyonfx = "0.25"
 crossterm = "0.29.0"
 notify = "6.1"
 sha2 = "0.10"

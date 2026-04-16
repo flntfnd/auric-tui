@@ -18,6 +18,7 @@ use ratatui::{Frame, Terminal};
 use std::cmp::min;
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
+use tachyonfx::{fx, EffectTimer, Interpolation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconMode {
@@ -147,6 +148,8 @@ pub struct ShellState {
     browse_filter_artist: Option<String>,
     browse_filter_album: Option<String>,
     pub spectrum_bands: Vec<f32>,
+    pub track_change_time: Option<Instant>,
+    last_track_path: String,
 }
 
 impl ShellState {
@@ -181,6 +184,8 @@ impl ShellState {
             browse_filter_artist: None,
             browse_filter_album: None,
             spectrum_bands: vec![0.0; 32],
+            track_change_time: None,
+            last_track_path: String::new(),
         };
         state.rebuild_track_filter();
         // Auto-trigger welcome panel on empty library
@@ -194,6 +199,8 @@ impl ShellState {
     }
 
     pub fn replace_snapshot(&mut self, snapshot: ShellSnapshot) {
+        let incoming_path = snapshot.now_playing_path.clone();
+        let incoming_status = snapshot.playback_status.clone();
         self.snapshot = snapshot;
         self.selected_root = self
             .selected_root
@@ -202,6 +209,14 @@ impl ShellState {
             .selected_playlist
             .min(self.snapshot.playlists.len().saturating_sub(1));
         self.rebuild_track_filter();
+        // Trigger fade when a new track starts playing.
+        if incoming_status == "playing"
+            && !incoming_path.is_empty()
+            && incoming_path != self.last_track_path
+        {
+            self.track_change_time = Some(Instant::now());
+            self.last_track_path = incoming_path;
+        }
     }
 
     pub fn move_selection(&mut self, delta: isize) {
@@ -1510,6 +1525,21 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
     }
     if state.input_mode == InputMode::TrackInfo {
         render_track_info_overlay(frame, state, palette);
+    }
+
+    // Fade-in effect on the Now Playing panel when a new track starts.
+    const FADE_DURATION_MS: u128 = 350;
+    if let Some(started) = state.track_change_time {
+        let elapsed = started.elapsed();
+        if elapsed.as_millis() < FADE_DURATION_MS {
+            let mut effect = fx::fade_from_fg(
+                palette.text_muted,
+                EffectTimer::from_ms(FADE_DURATION_MS as u32, Interpolation::QuadOut),
+            );
+            effect.process(elapsed.into(), frame.buffer_mut(), right_sections[0]);
+        } else {
+            state.track_change_time = None;
+        }
     }
 
     areas
