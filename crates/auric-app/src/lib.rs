@@ -2233,6 +2233,86 @@ fn execute_ui_palette_command(
                 path,
             ))
         }
+        "__setting_toggle" => {
+            let key = words.get(1).copied().unwrap_or("");
+            match key {
+                "use_theme_background" => {
+                    app.config.ui.use_theme_background = !app.config.ui.use_theme_background;
+                    Ok(PaletteCommandResult::new(
+                        format!(
+                            "Theme background: {}",
+                            if app.config.ui.use_theme_background { "on" } else { "off" }
+                        ),
+                        true,
+                    ))
+                }
+                "pixel_art_artwork" => {
+                    app.config.ui.pixel_art_artwork = !app.config.ui.pixel_art_artwork;
+                    Ok(PaletteCommandResult::new(
+                        format!(
+                            "Pixel art: {}",
+                            if app.config.ui.pixel_art_artwork { "on" } else { "off" }
+                        ),
+                        true,
+                    ))
+                }
+                _ => Ok(PaletteCommandResult::new(format!("Unknown setting: {key}"), false)),
+            }
+        }
+        "__setting_cycle" => {
+            let key = words.get(1).copied().unwrap_or("");
+            match key {
+                "theme" => {
+                    let store = FsThemeStore::new(default_theme_dir());
+                    let themes = store.list().unwrap_or_default();
+                    if !themes.is_empty() {
+                        let current_idx = themes
+                            .iter()
+                            .position(|t| t == &app.config.ui.theme)
+                            .unwrap_or(0);
+                        let next_idx = (current_idx + 1) % themes.len();
+                        app.config.ui.theme = themes[next_idx].clone();
+                    }
+                    Ok(PaletteCommandResult::new(
+                        format!("Theme: {}", app.config.ui.theme),
+                        true,
+                    ))
+                }
+                "icon_pack" => {
+                    app.config.ui.icon_pack = match app.config.ui.icon_pack.as_str() {
+                        "nerd-font" => "ascii".to_string(),
+                        _ => "nerd-font".to_string(),
+                    };
+                    Ok(PaletteCommandResult::new(
+                        format!("Icons: {}", app.config.ui.icon_pack),
+                        true,
+                    ))
+                }
+                "pixel_art_cell_size" => {
+                    app.config.ui.pixel_art_cell_size = match app.config.ui.pixel_art_cell_size {
+                        1 => 2,
+                        2 => 3,
+                        3 => 4,
+                        _ => 1,
+                    };
+                    Ok(PaletteCommandResult::new(
+                        format!("Pixel art cell: {}", app.config.ui.pixel_art_cell_size),
+                        true,
+                    ))
+                }
+                "color_scheme" => {
+                    app.config.ui.color_scheme = match app.config.ui.color_scheme.as_str() {
+                        "dark" => "light".to_string(),
+                        _ => "dark".to_string(),
+                    };
+                    Ok(PaletteCommandResult::new(
+                        format!("Color scheme: {}", app.config.ui.color_scheme),
+                        true,
+                    ))
+                }
+                _ => Ok(PaletteCommandResult::new(format!("Unknown setting: {key}"), false)),
+            }
+        }
         other => Ok(PaletteCommandResult::new(
             format!("Unknown command: {other} (use 'help')"),
             false,
@@ -2620,6 +2700,15 @@ fn build_shell_snapshot(app: &BootstrappedApp) -> ShellSnapshot {
             .current_index
             .map(|i| i + 1)
             .unwrap_or(0),
+        setting_use_theme_bg: app.config.ui.use_theme_background,
+        setting_icon_pack: app.config.ui.icon_pack.clone(),
+        setting_pixel_art: app.config.ui.pixel_art_artwork,
+        setting_pixel_art_cell_size: app.config.ui.pixel_art_cell_size,
+        setting_color_scheme: app.config.ui.color_scheme.clone(),
+        available_themes: {
+            let store = FsThemeStore::new(default_theme_dir());
+            store.list().unwrap_or_default()
+        },
     }
 }
 

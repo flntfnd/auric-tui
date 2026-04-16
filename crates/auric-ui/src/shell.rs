@@ -116,6 +116,12 @@ pub struct ShellSnapshot {
     pub artists: Vec<String>,
     pub albums: Vec<(String, String)>,
     pub total_track_count: usize,
+    pub setting_use_theme_bg: bool,
+    pub setting_icon_pack: String,
+    pub setting_pixel_art: bool,
+    pub setting_pixel_art_cell_size: u16,
+    pub setting_color_scheme: String,
+    pub available_themes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +157,7 @@ pub struct ShellState {
     pub spectrum_bands: Vec<f32>,
     pub track_change_time: Option<Instant>,
     last_track_path: String,
+    settings_index: usize,
 }
 
 impl ShellState {
@@ -187,6 +194,7 @@ impl ShellState {
             spectrum_bands: vec![0.0; 32],
             track_change_time: None,
             last_track_path: String::new(),
+            settings_index: 0,
         };
         state.rebuild_track_filter();
         // Auto-trigger welcome panel on empty library
@@ -302,6 +310,7 @@ impl ShellState {
             InputMode::TrackFilter => return self.handle_filter_key(key),
             InputMode::CommandPalette => return self.handle_command_palette_key(key),
             InputMode::AddMusic | InputMode::Welcome => return self.handle_add_music_key(key),
+            InputMode::Settings => return self.handle_settings_key(key),
             InputMode::Normal => {}
         }
 
@@ -374,6 +383,10 @@ impl ShellState {
                     self.input_mode = InputMode::TrackInfo;
                 }
             }
+            KeyCode::Char(',') => {
+                self.settings_index = 0;
+                self.input_mode = InputMode::Settings;
+            }
             _ => {}
         }
         KeyAction::Continue
@@ -445,6 +458,35 @@ impl ShellState {
                     }
                     self.last_click = Some((Instant::now(), x, y));
                 }
+            }
+            _ => {}
+        }
+        KeyAction::Continue
+    }
+
+    fn handle_settings_key(&mut self, key: KeyEvent) -> KeyAction {
+        let num_settings = 6;
+        match key.code {
+            KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') => {
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.settings_index = (self.settings_index + 1).min(num_settings - 1);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.settings_index = self.settings_index.saturating_sub(1);
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let command = match self.settings_index {
+                    0 => "__setting_cycle theme".to_string(),
+                    1 => "__setting_toggle use_theme_background".to_string(),
+                    2 => "__setting_cycle icon_pack".to_string(),
+                    3 => "__setting_toggle pixel_art_artwork".to_string(),
+                    4 => "__setting_cycle pixel_art_cell_size".to_string(),
+                    5 => "__setting_cycle color_scheme".to_string(),
+                    _ => return KeyAction::Continue,
+                };
+                return KeyAction::CommandSubmitted(command);
             }
             _ => {}
         }
@@ -876,6 +918,7 @@ enum InputMode {
     AddMusic,
     Welcome,
     TrackInfo,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1530,6 +1573,9 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
     if state.input_mode == InputMode::TrackInfo {
         render_track_info_overlay(frame, state, palette);
     }
+    if state.input_mode == InputMode::Settings {
+        render_settings_overlay(frame, state, palette);
+    }
 
     // Fade-in effect on the Now Playing panel when a new track starts.
     const FADE_DURATION_MS: u128 = 350;
@@ -2129,7 +2175,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
     frame.render_widget(paragraph, content_area);
 
     // Settings shortcut, bottom right
-    let hint = " ?: help  :: settings ";
+    let hint = " ?: help  ,: settings ";
     let hint_width = hint.len() as u16;
     if content_area.width > hint_width + 2 {
         let hint_area = Rect {
@@ -2207,6 +2253,51 @@ fn render_track_info_overlay(frame: &mut Frame, state: &ShellState, palette: &Pa
     crate::modal::render_modal(frame, "Track Info", lines, 60, 50, palette);
 }
 
+fn render_settings_overlay(frame: &mut Frame, state: &ShellState, palette: &Palette) {
+    let settings: Vec<(&str, String)> = vec![
+        ("Theme", state.snapshot.theme_name.clone()),
+        ("Use Theme Background", format!("{}", state.snapshot.setting_use_theme_bg)),
+        ("Icon Pack", state.snapshot.setting_icon_pack.clone()),
+        ("Pixel Art Artwork", format!("{}", state.snapshot.setting_pixel_art)),
+        ("Pixel Art Cell Size", format!("{}", state.snapshot.setting_pixel_art_cell_size)),
+        ("Color Scheme", state.snapshot.setting_color_scheme.clone()),
+    ];
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
+
+    for (i, (label, value)) in settings.iter().enumerate() {
+        let is_selected = i == state.settings_index;
+        let marker = if is_selected { " > " } else { "   " };
+        let style = if is_selected {
+            Style::default().fg(palette.text).bg(palette.selection_bg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(palette.text)
+        };
+        let value_style = if is_selected {
+            Style::default().fg(palette.accent).bg(palette.selection_bg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(palette.accent)
+        };
+
+        let restart_note = if i == 0 || i == 5 { "  (restart to apply)" } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled(marker, style),
+            Span::styled(format!("{label:<25}"), style),
+            Span::styled(value.as_str(), value_style),
+            Span::styled(restart_note, Style::default().fg(palette.text_muted)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "   Enter/Space: change   Esc: close",
+        Style::default().fg(palette.text_muted),
+    )));
+
+    crate::modal::render_modal(frame, "Settings", lines, 55, 45, palette);
+}
+
 fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
     let area = centered_rect(65, 60, frame.area());
     frame.render_widget(Clear, area);
@@ -2233,6 +2324,7 @@ fn render_help_overlay(frame: &mut Frame, palette: &Palette) {
         Line::from("q or Ctrl-C: quit"),
         Line::from("r: refresh library"),
         Line::from("i: track info"),
+        Line::from(",: settings"),
         Line::from("?: toggle this help"),
     ];
     let paragraph = Paragraph::new(lines)
@@ -2692,6 +2784,12 @@ mod tests {
             artists: vec!["Artist".to_string()],
             albums: vec![("Album".to_string(), "Artist".to_string())],
             total_track_count: 1,
+            setting_use_theme_bg: false,
+            setting_icon_pack: "nerd-font".to_string(),
+            setting_pixel_art: false,
+            setting_pixel_art_cell_size: 2,
+            setting_color_scheme: "dark".to_string(),
+            available_themes: vec!["auric-dark".to_string()],
         })
     }
 
