@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::fs::File;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
@@ -128,7 +127,6 @@ fn player_thread(
     let volume = Arc::new(AtomicU32::new(f32::to_bits(1.0)));
 
     loop {
-        // Idle state: block waiting for commands
         let cmd = match cmd_rx.recv() {
             Ok(cmd) => cmd,
             Err(_) => return,
@@ -140,7 +138,6 @@ fn player_thread(
                 match result {
                     PlayResult::Finished | PlayResult::Stopped | PlayResult::Error => {}
                     PlayResult::LoadNew(new_path) => {
-                        // Re-enter the load path iteratively instead of recursing
                         let mut current_path = new_path;
                         while let PlayResult::LoadNew(next) = play_track(
                             &current_path,
@@ -160,7 +157,6 @@ fn player_thread(
                 volume.store(v.to_bits(), Ordering::Relaxed);
             }
             PlayerCommand::Shutdown => return,
-            // Ignore pause/resume/stop when idle
             _ => {}
         }
     }
@@ -173,6 +169,45 @@ enum PlayResult {
     LoadNew(String),
     Shutdown,
     Disconnected,
+}
+
+/// Linear interpolation resampling for sample rate conversion.
+/// Operates on interleaved multi-channel audio.
+fn resample_linear(samples: &[f32], channels: u16, ratio: f64) -> Vec<f32> {
+    if (ratio - 1.0).abs() < 0.001 {
+        return samples.to_vec();
+    }
+    let ch = channels as usize;
+    let frames_in = samples.len() / ch;
+    let frames_out = (frames_in as f64 * ratio).ceil() as usize;
+    let mut out = Vec::with_capacity(frames_out * ch);
+    for i in 0..frames_out {
+        let src_pos = i as f64 / ratio;
+        let src_idx = src_pos.floor() as usize;
+        let frac = (src_pos - src_idx as f64) as f32;
+        for c in 0..ch {
+            let s0 = samples.get(src_idx * ch + c).copied().unwrap_or(0.0);
+            let s1 = samples.get((src_idx + 1) * ch + c).copied().unwrap_or(s0);
+            out.push(s0 + (s1 - s0) * frac);
+        }
+    }
+    out
+}
+
+fn upmix_mono_to_stereo(samples: &[f32]) -> Vec<f32> {
+    let mut out = Vec::with_capacity(samples.len() * 2);
+    for &s in samples {
+        out.push(s);
+        out.push(s);
+    }
+    out
+}
+
+fn downmix_stereo_to_mono(samples: &[f32]) -> Vec<f32> {
+    samples
+        .chunks(2)
+        .map(|pair| (pair[0] + pair.get(1).copied().unwrap_or(pair[0])) * 0.5)
+        .collect()
 }
 
 fn play_track(
@@ -234,7 +269,7 @@ fn play_track(
         return PlayResult::Error;
     }
 
-    let sample_rate = match track.codec_params.sample_rate {
+    let file_sample_rate = match track.codec_params.sample_rate {
         Some(sr) => sr,
         None => {
             let _ = event_tx.send(PlayerEvent::Error {
@@ -244,7 +279,7 @@ fn play_track(
         }
     };
 
-    let channels = track
+    let file_channels = track
         .codec_params
         .channels
         .map(|c| c.count() as u16)
@@ -253,7 +288,7 @@ fn play_track(
     let duration_ms = track
         .codec_params
         .n_frames
-        .map(|frames| frames * 1000 / sample_rate as u64)
+        .map(|frames| frames * 1000 / file_sample_rate as u64)
         .unwrap_or(0);
 
     let mut decoder = match symphonia::default::get_codecs().make(
@@ -271,14 +306,7 @@ fn play_track(
 
     let track_id = track.id;
 
-    // Shared sample buffer between decode thread and cpal callback.
-    // Capacity: 2 seconds of audio. The decode loop throttles at 1 second,
-    // so the buffer should not grow much beyond this.
-    let buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::with_capacity(
-        sample_rate as usize * channels as usize * 2,
-    )));
-
-    // Build cpal output stream
+    // Query device for its preferred output configuration
     let host = cpal::default_host();
     let device = match host.default_output_device() {
         Some(d) => d,
@@ -290,22 +318,48 @@ fn play_track(
         }
     };
 
+    let default_config = match device.default_output_config() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = event_tx.send(PlayerEvent::Error {
+                message: format!("failed to query device config: {e}"),
+            });
+            return PlayResult::Error;
+        }
+    };
+
+    let device_sample_rate = default_config.sample_rate();
+    let device_channels = default_config.channels();
+
+    let needs_resample = device_sample_rate != file_sample_rate;
+    let resample_ratio = device_sample_rate as f64 / file_sample_rate as f64;
+
+    let needs_channel_convert = file_channels != device_channels;
+
+    // Lock-free ring buffer: ~2 seconds at the device's output rate
+    // Buffer size in samples (frames * channels)
+    let ring_capacity = device_sample_rate as usize * device_channels as usize * 2;
+    let (mut producer, consumer) = rtrb::RingBuffer::new(ring_capacity);
+
     let stream_config = cpal::StreamConfig {
-        channels: channels as cpal::ChannelCount,
-        sample_rate,
+        channels: device_channels as cpal::ChannelCount,
+        sample_rate: device_sample_rate,
         buffer_size: cpal::BufferSize::Default,
     };
 
-    let buf_ref = Arc::clone(&buffer);
     let vol_ref = Arc::clone(volume);
 
+    // Consumer lives in the cpal callback: lock-free, allocation-free
+    let mut consumer = Some(consumer);
     let stream = match device.build_output_stream(
         &stream_config,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            let vol = f32::from_bits(vol_ref.load(Ordering::Relaxed));
-            let mut buf = buf_ref.lock().expect("audio buffer lock poisoned");
-            for sample in data.iter_mut() {
-                *sample = buf.pop_front().unwrap_or(0.0) * vol;
+        {
+            let mut consumer = consumer.take().expect("consumer already taken");
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let vol = f32::from_bits(vol_ref.load(Ordering::Relaxed));
+                for sample in data.iter_mut() {
+                    *sample = consumer.pop().unwrap_or(0.0) * vol;
+                }
             }
         },
         |err| {
@@ -333,7 +387,8 @@ fn play_track(
         path: path.to_string(),
     });
 
-    let one_sec_samples = sample_rate as usize * channels as usize;
+    // Throttle threshold: 1 second of device-rate audio in the ring buffer
+    let one_sec_samples = device_sample_rate as usize * device_channels as usize;
     let mut paused = false;
     let mut last_position_report = Instant::now();
     let mut decoded_samples: u64 = 0;
@@ -390,14 +445,11 @@ fn play_track(
             Err(mpsc::TryRecvError::Disconnected) => return PlayResult::Disconnected,
         }
 
-        // Throttle if buffer has more than 1 second of audio
-        {
-            let buf = buffer.lock().expect("audio buffer lock poisoned");
-            if buf.len() > one_sec_samples {
-                drop(buf);
-                thread::sleep(Duration::from_millis(10));
-                continue;
-            }
+        // Throttle if ring buffer has more than 1 second of audio
+        let available = ring_capacity - producer.slots();
+        if available > one_sec_samples {
+            thread::sleep(Duration::from_millis(10));
+            continue;
         }
 
         // Decode next packet
@@ -406,13 +458,11 @@ fn play_track(
             Err(symphonia::core::errors::Error::IoError(ref e))
                 if e.kind() == std::io::ErrorKind::UnexpectedEof =>
             {
-                // EOF: wait for buffer to drain, then signal track finished
+                // EOF: wait for ring buffer to drain, then signal track finished
                 loop {
-                    {
-                        let buf = buffer.lock().expect("audio buffer lock poisoned");
-                        if buf.is_empty() {
-                            break;
-                        }
+                    let buffered = ring_capacity - producer.slots();
+                    if buffered == 0 {
+                        break;
                     }
                     thread::sleep(Duration::from_millis(20));
                 }
@@ -434,7 +484,6 @@ fn play_track(
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
             Err(symphonia::core::errors::Error::DecodeError(msg)) => {
-                // Non-fatal: skip this packet
                 eprintln!("decode error (skipping): {msg}");
                 continue;
             }
@@ -449,8 +498,6 @@ fn play_track(
         let spec = *decoded.spec();
         let num_frames = decoded.frames();
 
-        // Reuse sample buffer across packets when the format hasn't changed,
-        // avoiding a heap allocation per packet.
         let sbuf = match &mut sample_buf {
             Some(existing) if existing.capacity() >= num_frames => existing,
             _ => {
@@ -459,28 +506,56 @@ fn play_track(
             }
         };
         sbuf.copy_interleaved_ref(decoded);
-        let samples = sbuf.samples();
+        let raw_samples = sbuf.samples();
 
+        // Count pre-resample frames for accurate position tracking
         decoded_samples += num_frames as u64;
 
-        {
-            let mut buf = buffer.lock().expect("audio buffer lock poisoned");
-            buf.extend(samples);
+        // Resample if the device sample rate differs from the file
+        let resampled;
+        let after_resample = if needs_resample {
+            resampled = resample_linear(raw_samples, file_channels, resample_ratio);
+            &resampled
+        } else {
+            raw_samples
+        };
+
+        // Channel conversion: match file channels to device channels
+        let converted;
+        let final_samples = if needs_channel_convert {
+            if file_channels == 1 && device_channels == 2 {
+                converted = upmix_mono_to_stereo(after_resample);
+                &converted
+            } else if file_channels == 2 && device_channels == 1 {
+                converted = downmix_stereo_to_mono(after_resample);
+                &converted
+            } else {
+                after_resample
+            }
+        } else {
+            after_resample
+        };
+
+        // Push processed samples into the lock-free ring buffer
+        for &sample in final_samples {
+            while producer.push(sample).is_err() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
 
         // Store latest samples for visualization (capped at 2048 samples)
         if let Ok(mut vb) = viz_buf.lock() {
             vb.clear();
-            if samples.len() <= 2048 {
-                vb.extend_from_slice(samples);
+            if raw_samples.len() <= 2048 {
+                vb.extend_from_slice(raw_samples);
             } else {
-                vb.extend_from_slice(&samples[samples.len() - 2048..]);
+                vb.extend_from_slice(&raw_samples[raw_samples.len() - 2048..]);
             }
         }
 
         // Send position updates roughly every 250ms
         if last_position_report.elapsed() >= Duration::from_millis(250) {
-            let position_ms = decoded_samples * 1000 / sample_rate as u64;
+            let position_ms = decoded_samples * 1000 / file_sample_rate as u64;
             let _ = event_tx.send(PlayerEvent::Position {
                 position_ms,
                 duration_ms,
