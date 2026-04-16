@@ -24,24 +24,30 @@ impl<'a> Widget for SeekBar<'a> {
         // Elapsed label
         buf.set_string(area.x, area.y, self.elapsed, Style::default().fg(self.palette.text_muted));
 
-        // Progress bar
-        let filled = ((bar_width as f32) * self.progress.clamp(0.0, 1.0)).round() as u16;
-        let filled_str = "━";
-        let empty_str = "─";
+        // Progress bar with half-block precision
+        let fill_exact = (bar_width as f32) * self.progress.clamp(0.0, 1.0);
+        let filled_full = fill_exact.floor() as u16;
+        let fractional = fill_exact - fill_exact.floor();
+
+        let dim_empty = Style::default().fg(self.palette.border_unfocused);
+
         for x in bar_start..bar_end {
-            let is_filled = x.saturating_sub(bar_start) < filled;
-            let (s, color) = if is_filled {
-                (filled_str, self.palette.progress_fill)
+            let offset = x.saturating_sub(bar_start);
+            if offset < filled_full {
+                buf.set_string(x, area.y, "━", Style::default().fg(self.palette.progress_fill));
+            } else if offset == filled_full && fractional >= 0.5 && x < bar_end {
+                // Half-block transition at the fill edge
+                buf.set_string(x, area.y, "╸", Style::default().fg(self.palette.progress_fill));
             } else {
-                (empty_str, self.palette.border)
-            };
-            buf.set_string(x, area.y, s, Style::default().fg(color));
+                buf.set_string(x, area.y, "─", dim_empty);
+            }
         }
 
-        // Playhead
-        if filled > 0 && bar_start + filled < bar_end {
+        // Playhead dot at the fill edge
+        let playhead_pos = bar_start + filled_full;
+        if filled_full > 0 && playhead_pos < bar_end {
             buf.set_string(
-                bar_start + filled,
+                playhead_pos,
                 area.y,
                 "●",
                 Style::default().fg(self.palette.accent),

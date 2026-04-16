@@ -865,7 +865,7 @@ impl ShellState {
             areas.tracks.visible_items,
         );
         if self.browse.show_items {
-            let browse_inner = padded_inner(areas.browse);
+            let browse_inner = borderless_content_area(areas.browse);
             let modes_height = crate::browse::BrowseMode::all().len() as u16 + 1;
             let items_visible = browse_inner.height.saturating_sub(modes_height) as usize;
             self.browse.item_scroll = normalize_scroll(
@@ -1075,8 +1075,15 @@ struct PaneArea {
 }
 
 impl PaneArea {
+    #[cfg_attr(not(test), allow(dead_code))]
     fn bordered(area: Rect, item_height: u16) -> Self {
         Self::from_list_area(area, inner_rect(area), item_height)
+    }
+
+    /// For borderless sections: header takes 1 row, content has 1-cell left pad.
+    fn borderless(area: Rect, item_height: u16) -> Self {
+        let content = borderless_content_area(area);
+        Self::from_list_area(area, content, item_height)
     }
 
     fn from_list_area(outer: Rect, list_area: Rect, item_height: u16) -> Self {
@@ -1580,15 +1587,24 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(12), Constraint::Length(4)])
+        .constraints([Constraint::Min(12), Constraint::Length(2)])
         .split(root);
     let main = vertical[0];
     let footer = vertical[1];
 
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(27), Constraint::Percentage(73)])
+        .constraints([
+            Constraint::Percentage(27),
+            Constraint::Length(1), // vertical separator
+            Constraint::Percentage(73),
+        ])
         .split(main);
+    let left_col = cols[0];
+    let separator_col = cols[1];
+    let right_col = cols[2];
+
+    render_vertical_separator(frame, separator_col, palette);
 
     let left_sections = Layout::default()
         .direction(Direction::Vertical)
@@ -1599,7 +1615,7 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
             Constraint::Length(1),  // gap
             Constraint::Min(8),
         ])
-        .split(cols[0]);
+        .split(left_col);
 
     let right_sections = Layout::default()
         .direction(Direction::Vertical)
@@ -1608,13 +1624,13 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
             Constraint::Length(1),  // gap
             Constraint::Min(12),
         ])
-        .split(cols[1]);
+        .split(right_col);
 
     let (header_area, library_rows_area) = library_panel_inner_areas(right_sections[2]);
     let areas = RenderAreas {
-        roots: PaneArea::bordered(left_sections[0], 1),
+        roots: PaneArea::borderless(left_sections[0], 1),
         browse: left_sections[2],
-        playlists: PaneArea::bordered(left_sections[4], 1),
+        playlists: PaneArea::borderless(left_sections[4], 1),
         tracks: PaneArea::from_list_area(right_sections[2], library_rows_area, 1),
         track_header: header_area,
         track_col_offsets: TrackColumnOffsets::default(),
@@ -1668,6 +1684,19 @@ fn draw_shell(frame: &mut Frame, state: &mut ShellState, palette: &Palette) -> R
 }
 
 fn render_roots(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
+    let focused = state.focus == FocusPane::Sources;
+    let base_style = if focused {
+        Style::default().fg(palette.text)
+    } else {
+        Style::default().fg(palette.text).add_modifier(Modifier::DIM)
+    };
+
+    render_section_header(frame, area, "Library Roots", focused, palette);
+    let content_area = borderless_content_area(area);
+    if content_area.width == 0 || content_area.height == 0 {
+        return;
+    }
+
     let items: Vec<ListItem> = if state.snapshot.roots.is_empty() {
         vec![
             ListItem::new(Line::from("")),
@@ -1690,31 +1719,27 @@ fn render_roots(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: 
                 let icon = icon_glyph(state.snapshot.icon_mode, IconToken::Folder);
                 let detail = r.detail.as_deref().unwrap_or("");
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{icon} "), Style::default().fg(palette.accent)),
-                    Span::raw(&r.label),
+                    Span::styled(format!("{icon} "), base_style.fg(palette.accent)),
+                    Span::styled(&r.label, base_style),
                     Span::styled(
                         if detail.is_empty() {
                             String::new()
                         } else {
                             format!("  {detail}")
                         },
-                        Style::default().fg(palette.text_muted),
+                        base_style.fg(palette.text_muted),
                     ),
                 ]))
             })
             .collect()
     };
 
-    let block = pane_block("Library Roots", state.focus == FocusPane::Sources, palette);
-    let content_area = padded_inner(area);
-    frame.render_widget(block, area);
-
     let list = List::new(items)
+        .highlight_symbol("▌ ")
         .highlight_style(
             Style::default()
                 .bg(palette.selection_bg)
-                .fg(palette.text)
-                .add_modifier(Modifier::BOLD),
+                .fg(palette.text),
         );
     let mut list_state = ListState::default().with_selected(Some(min(
         state.selected_root,
@@ -1726,9 +1751,13 @@ fn render_roots(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: 
 
 fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
     let focused = state.focus == FocusPane::Browse;
-    let block = pane_block("Browse Library", focused, palette);
-    let content_area = padded_inner(area);
-    frame.render_widget(block, area);
+
+    render_section_header(frame, area, "Browse Library", focused, palette);
+    let content_area = borderless_content_area(area);
+    if content_area.width == 0 || content_area.height == 0 {
+        return;
+    }
+    let dim = if focused { Modifier::empty() } else { Modifier::DIM };
 
     let modes = crate::browse::BrowseMode::all();
     let mode_icons = [IconToken::Track, IconToken::Folder, IconToken::Playlist];
@@ -1745,7 +1774,7 @@ fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palett
                     palette.focus
                 } else {
                     palette.text_muted
-                }),
+                }).add_modifier(dim),
             ),
             Span::styled(
                 mode.label(),
@@ -1756,9 +1785,9 @@ fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palett
                         palette.text_muted
                     })
                     .add_modifier(if is_current {
-                        Modifier::BOLD
+                        Modifier::BOLD | dim
                     } else {
-                        Modifier::empty()
+                        dim
                     }),
             ),
         ];
@@ -1789,7 +1818,7 @@ fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palett
             } else {
                 palette.text_muted
             };
-            let mut style = Style::default().fg(fg);
+            let mut style = Style::default().fg(fg).add_modifier(dim);
             if is_active {
                 style = style.add_modifier(Modifier::BOLD);
             }
@@ -1808,8 +1837,24 @@ fn render_browse_modes(frame: &mut Frame, area: Rect, state: &ShellState, palett
 }
 
 fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palette: &Palette) {
+    let focused = state.focus == FocusPane::Inspector;
+    let base_style = if focused {
+        Style::default().fg(palette.text)
+    } else {
+        Style::default().fg(palette.text).add_modifier(Modifier::DIM)
+    };
+
+    render_section_header(frame, area, "Playlists", focused, palette);
+    let content_area = borderless_content_area(area);
+    if content_area.width == 0 || content_area.height == 0 {
+        return;
+    }
+
     let items: Vec<ListItem> = if state.snapshot.playlists.is_empty() {
-        vec![ListItem::new(Line::from("No playlists"))]
+        vec![ListItem::new(Line::from(Span::styled(
+            "No playlists",
+            base_style.fg(palette.text_muted),
+        )))]
     } else {
         state
             .snapshot
@@ -1818,22 +1863,19 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &mut ShellState, palet
             .map(|p| {
                 let icon = icon_glyph(state.snapshot.icon_mode, IconToken::Playlist);
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{icon} "), Style::default().fg(palette.accent_2)),
-                    Span::raw(&p.label),
+                    Span::styled(format!("{icon} "), base_style.fg(palette.accent_2)),
+                    Span::styled(&p.label, base_style),
                 ]))
             })
             .collect()
     };
 
-    let block = pane_block("Playlists", state.focus == FocusPane::Inspector, palette);
-    let content_area = padded_inner(area);
-    frame.render_widget(block, area);
-
     let list = List::new(items)
+        .highlight_symbol("▌ ")
         .highlight_style(
             Style::default()
                 .bg(palette.selection_bg)
-                .add_modifier(Modifier::BOLD),
+                .fg(palette.text),
         );
     let mut list_state = ListState::default().with_selected(Some(min(
         state.selected_playlist,
@@ -1966,9 +2008,11 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
             )))]
         }
     } else {
+        let use_alt_bg = !palette.use_terminal_bg;
         state
             .filtered_track_iter()
-            .map(|t| {
+            .enumerate()
+            .map(|(idx, t)| {
                 let row = format!(
                     "{}{}{}{}{}",
                     pad_cell(&truncate_text(&t.title, col_title.saturating_sub(1)), col_title),
@@ -1977,22 +2021,30 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
                     pad_cell(&truncate_text(&t.album, col_album.saturating_sub(1)), col_album),
                     format_tech_compact(t.sample_rate, t.bit_depth, t.channels)
                 );
-                ListItem::new(Line::from(Span::styled(
-                    row,
-                    Style::default().fg(palette.text),
-                )))
+                let row_style = if use_alt_bg && idx % 2 == 1 {
+                    Style::default().fg(palette.text).bg(palette.surface_2)
+                } else {
+                    Style::default().fg(palette.text)
+                };
+                ListItem::new(Line::from(Span::styled(row, row_style)))
             })
             .collect()
     };
 
+    let focused = state.focus == FocusPane::Tracks;
     let list = List::new(items)
         .highlight_style(
             Style::default()
                 .bg(palette.selection_bg)
-                .add_modifier(Modifier::BOLD),
+                .fg(palette.text),
         )
         .highlight_symbol("▌ ")
-        .repeat_highlight_symbol(true);
+        .repeat_highlight_symbol(true)
+        .style(if focused {
+            Style::default()
+        } else {
+            Style::default().add_modifier(Modifier::DIM)
+        });
     let selected = if state.filtered_track_count() == 0 {
         None
     } else {
@@ -2212,17 +2264,37 @@ fn format_ms(ms: u64) -> String {
 
 
 fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Palette) {
-    let block = pane_block("", false, palette);
-    let content_area = padded_inner(area);
-    frame.render_widget(block, area);
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
 
-    let mut lines = Vec::new();
+    // Dim top separator line
+    let rule: String = "─".repeat(area.width as usize);
+    frame.buffer_mut().set_string(
+        area.x,
+        area.y,
+        &rule,
+        Style::default().fg(palette.border_unfocused),
+    );
+
+    let content_area = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(1),
+    };
+    if content_area.width == 0 || content_area.height == 0 {
+        return;
+    }
+
+    // Line 1: playback status + track info + badges
     let filter_info = if state.track_filter_query.is_empty() {
         String::new()
     } else {
         format!("  filter: /{}", state.track_filter_query)
     };
-    let mut title_spans = vec![
+
+    let mut line1_spans = vec![
         Span::styled(
             state.snapshot.app_title.as_str(),
             Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
@@ -2233,27 +2305,24 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
         ),
     ];
     if state.scanning_path.is_some() {
-        title_spans.push(Span::styled(
+        line1_spans.push(Span::styled(
             "  [scanning...]",
             Style::default().fg(palette.warning).add_modifier(Modifier::BOLD),
         ));
     }
-    lines.push(Line::from(title_spans));
-    let status_msg = state.status_message.as_deref().unwrap_or(default_status_message());
-    lines.push(Line::from(Span::styled(
-        status_msg,
-        Style::default().fg(if state.scanning_path.is_some() {
-            palette.accent
-        } else {
-            palette.text_muted
-        }),
-    )));
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, content_area);
 
-    // Settings shortcut, bottom right
-    let hint = " ?: help  ,: settings ";
+    // Badges on the right side of line 1
+    let hint = "?: help  ,: settings";
     let hint_width = hint.len() as u16;
+
+    let line1_area = Rect {
+        x: content_area.x,
+        y: content_area.y,
+        width: content_area.width,
+        height: 1,
+    };
+    frame.render_widget(Paragraph::new(Line::from(line1_spans)), line1_area);
+
     if content_area.width > hint_width + 2 {
         let hint_area = Rect {
             x: content_area.x + content_area.width - hint_width,
@@ -2264,6 +2333,28 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
         frame.render_widget(
             Paragraph::new(Span::styled(hint, Style::default().fg(palette.text_muted))),
             hint_area,
+        );
+    }
+
+    // Line 2: contextual help hints
+    if content_area.height > 1 {
+        let status_msg = state.status_message.as_deref().unwrap_or(default_status_message());
+        let line2_area = Rect {
+            x: content_area.x,
+            y: content_area.y + 1,
+            width: content_area.width,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                status_msg,
+                Style::default().fg(if state.scanning_path.is_some() {
+                    palette.accent
+                } else {
+                    palette.text_muted
+                }),
+            )),
+            line2_area,
         );
     }
 }
@@ -2693,6 +2784,67 @@ fn pane_block<'a>(title: &'a str, focused: bool, palette: &Palette) -> Block<'a>
         .title(Span::styled(format!(" {title} "), title_style))
         .border_style(border_style)
         .style(Style::default().bg(palette.bg_panel()).fg(palette.text))
+}
+
+/// Render a borderless section header: bold title in accent color + dim rule line.
+fn render_section_header(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    focused: bool,
+    palette: &Palette,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let title_style = if focused {
+        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(palette.accent)
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::DIM)
+    };
+    let title_len = title.chars().count() as u16;
+    let rule_width = area.width.saturating_sub(title_len + 1);
+    let rule: String = "─".repeat(rule_width as usize);
+    let line = Line::from(vec![
+        Span::styled(title, title_style),
+        Span::raw(" "),
+        Span::styled(rule, Style::default().fg(palette.border_unfocused)),
+    ]);
+    let header_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+    frame.render_widget(Paragraph::new(line), header_area);
+}
+
+/// Get the content area below a section header, with 1-cell left padding.
+fn borderless_content_area(area: Rect) -> Rect {
+    if area.height <= 1 || area.width <= 1 {
+        return Rect::new(area.x, area.y, 0, 0);
+    }
+    Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(1),
+        height: area.height.saturating_sub(1),
+    }
+}
+
+/// Draw a dim vertical separator line filling the given column.
+fn render_vertical_separator(frame: &mut Frame, area: Rect, palette: &Palette) {
+    for row in area.y..area.y + area.height {
+        frame.buffer_mut().set_string(
+            area.x,
+            row,
+            "│",
+            Style::default().fg(palette.border_unfocused),
+        );
+    }
 }
 
 fn library_panel_inner_areas(area: Rect) -> (Rect, Rect) {
