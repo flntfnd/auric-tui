@@ -2233,6 +2233,18 @@ fn execute_ui_palette_command(
                 path,
             ))
         }
+        "__fetch_artwork" => {
+            let path = strip_n_words(command, 1)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_default();
+            let data = if path.is_empty() {
+                None
+            } else {
+                app.db.get_artwork_data_for_track(&path).ok().flatten()
+            };
+            Ok(PaletteCommandResult::with_artwork("", data))
+        }
         "__setting_toggle" => {
             let key = words.get(1).copied().unwrap_or("");
             match key {

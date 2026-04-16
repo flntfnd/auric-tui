@@ -157,6 +157,8 @@ pub struct ShellState {
     pub spectrum_bands: Vec<f32>,
     pub track_change_time: Option<Instant>,
     last_track_path: String,
+    track_info_artwork: Option<Vec<u8>>,
+    track_info_art_state: crate::artwork::ArtworkState,
     settings_index: usize,
 }
 
@@ -194,6 +196,8 @@ impl ShellState {
             spectrum_bands: vec![0.0; 32],
             track_change_time: None,
             last_track_path: String::new(),
+            track_info_artwork: None,
+            track_info_art_state: crate::artwork::ArtworkState::new(),
             settings_index: 0,
         };
         state.rebuild_track_filter();
@@ -379,8 +383,12 @@ impl ShellState {
                 ));
             }
             KeyCode::Char('i') if self.focus == FocusPane::Tracks => {
-                if self.selected_track_item().is_some() {
+                let path = self.selected_track_item().map(|t| t.path.clone());
+                if let Some(path) = path {
+                    self.track_info_artwork = None;
+                    self.track_info_art_state.clear();
                     self.input_mode = InputMode::TrackInfo;
+                    return KeyAction::CommandSubmitted(format!("__fetch_artwork {path}"));
                 }
             }
             KeyCode::Char(',') => {
@@ -989,6 +997,8 @@ pub struct PaletteCommandResult {
     pub refresh_requested: bool,
     /// If set, the event loop should spawn a background scan for this path.
     pub background_scan_path: Option<String>,
+    /// Artwork data returned by __fetch_artwork command.
+    pub artwork_data: Option<Vec<u8>>,
 }
 
 impl PaletteCommandResult {
@@ -997,6 +1007,7 @@ impl PaletteCommandResult {
             status_message: status_message.into(),
             refresh_requested,
             background_scan_path: None,
+            artwork_data: None,
         }
     }
 
@@ -1008,6 +1019,16 @@ impl PaletteCommandResult {
             status_message: status_message.into(),
             refresh_requested: false,
             background_scan_path: Some(scan_path),
+            artwork_data: None,
+        }
+    }
+
+    pub fn with_artwork(status_message: impl Into<String>, data: Option<Vec<u8>>) -> Self {
+        Self {
+            status_message: status_message.into(),
+            refresh_requested: false,
+            background_scan_path: None,
+            artwork_data: data,
         }
     }
 }
@@ -1272,6 +1293,9 @@ fn run_loop(
                 state.status_message = Some(format!("Scanning {}...", scan_path));
                 *scan_rx = Some((*handler)(scan_path));
             }
+        }
+        if result.artwork_data.is_some() {
+            state.track_info_artwork = result.artwork_data;
         }
     };
 
@@ -2196,66 +2220,142 @@ fn render_status(frame: &mut Frame, area: Rect, state: &ShellState, palette: &Pa
     }
 }
 
-fn render_track_info_overlay(frame: &mut Frame, state: &ShellState, palette: &Palette) {
+fn render_track_info_overlay(frame: &mut Frame, state: &mut ShellState, palette: &Palette) {
     let track = match state.selected_track_item() {
-        Some(t) => t,
+        Some(t) => t.clone(),
         None => return,
     };
 
-    let mut lines = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Title:   ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.title.as_str(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("Artist:  ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.artist.as_str(), Style::default().fg(palette.text)),
-        ]),
-        Line::from(vec![
-            Span::styled("Album:   ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.album.as_str(), Style::default().fg(palette.text)),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Path:    ", Style::default().fg(palette.text_muted)),
-            Span::styled(track.path.as_str(), Style::default().fg(palette.text)),
-        ]),
-        Line::from(""),
-    ];
+    let frame_area = frame.area();
+    let width = (frame_area.width * 70 / 100).max(50).min(frame_area.width.saturating_sub(4));
+    let height = (frame_area.height * 70 / 100).max(16).min(frame_area.height.saturating_sub(4));
+    let x = frame_area.x + (frame_area.width.saturating_sub(width)) / 2;
+    let y = frame_area.y + (frame_area.height.saturating_sub(height)) / 2;
+    let area = Rect::new(x, y, width, height);
 
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(
+            " Track Info ",
+            Style::default().fg(palette.border_focused).add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(palette.border_focused))
+        .style(Style::default().bg(palette.bg_panel()).fg(palette.text));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let content = Rect {
+        x: inner.x.saturating_add(1),
+        y: inner.y,
+        width: inner.width.saturating_sub(2),
+        height: inner.height,
+    };
+
+    if content.height < 4 || content.width < 20 {
+        return;
+    }
+
+    // Split: artwork on left, metadata on right
+    let has_art = state.track_info_artwork.is_some();
+    let art_width = if has_art {
+        content.height.saturating_mul(2).min(content.width / 3)
+    } else {
+        0
+    };
+    let art_area = Rect {
+        x: content.x,
+        y: content.y,
+        width: art_width,
+        height: content.height.saturating_sub(2), // leave room for footer
+    };
+    let meta_area = Rect {
+        x: content.x + art_width + if has_art { 1 } else { 0 },
+        y: content.y,
+        width: content.width.saturating_sub(art_width + if has_art { 1 } else { 0 }),
+        height: content.height,
+    };
+
+    // Render artwork
+    if has_art {
+        state.track_info_art_state.update(
+            &track.path,
+            state.track_info_artwork.as_deref(),
+            false,
+            2,
+        );
+        if let Some(protocol) = &mut state.track_info_art_state.current_image {
+            frame.render_stateful_widget(
+                ratatui_image::StatefulImage::default(),
+                art_area,
+                protocol,
+            );
+        }
+    }
+
+    // Render metadata
     let duration = track.duration_ms.map(|ms| {
         let secs = ms / 1000;
         format!("{}:{:02}", secs / 60, secs % 60)
     }).unwrap_or_else(|| "--:--".to_string());
 
-    let sample_rate = track.sample_rate.map(|sr| format!("{} Hz", sr)).unwrap_or_else(|| "-".to_string());
-    let channels = track.channels.map(|ch| format!("{}", ch)).unwrap_or_else(|| "-".to_string());
-    let bit_depth = track.bit_depth.map(|bd| format!("{}-bit", bd)).unwrap_or_else(|| "-".to_string());
+    let sample_rate = track.sample_rate.map(|sr| {
+        let khz = sr / 1000;
+        let rem = (sr % 1000) / 100;
+        if rem > 0 { format!("{khz}.{rem} kHz") } else { format!("{khz} kHz") }
+    }).unwrap_or_else(|| "-".to_string());
+    let channels = track.channels.map(|ch| {
+        match ch { 1 => "Mono".to_string(), 2 => "Stereo".to_string(), n => format!("{n}ch") }
+    }).unwrap_or_else(|| "-".to_string());
+    let bit_depth = track.bit_depth.filter(|&bd| bd > 0).map(|bd| format!("{bd}-bit")).unwrap_or_else(|| "Lossy".to_string());
 
-    lines.push(Line::from(vec![
-        Span::styled("Duration:    ", Style::default().fg(palette.text_muted)),
-        Span::styled(duration, Style::default().fg(palette.text)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Sample Rate: ", Style::default().fg(palette.text_muted)),
-        Span::styled(sample_rate, Style::default().fg(palette.text)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Channels:    ", Style::default().fg(palette.text_muted)),
-        Span::styled(channels, Style::default().fg(palette.text)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Bit Depth:   ", Style::default().fg(palette.text_muted)),
-        Span::styled(bit_depth, Style::default().fg(palette.text)),
-    ]));
-    lines.push(Line::from(""));
+    let label_style = Style::default().fg(palette.text_muted);
+    let value_style = Style::default().fg(palette.text);
+    let title_style = Style::default().fg(palette.text).add_modifier(Modifier::BOLD);
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(&track.title, title_style)),
+        Line::from(Span::styled(&track.artist, Style::default().fg(palette.accent))),
+        Line::from(Span::styled(&track.album, value_style)),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Duration     ", label_style),
+            Span::styled(duration, value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("Sample Rate  ", label_style),
+            Span::styled(sample_rate, value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("Channels     ", label_style),
+            Span::styled(channels, value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("Bit Depth    ", label_style),
+            Span::styled(bit_depth, value_style),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Path  ", label_style),
+            Span::styled(&track.path, Style::default().fg(palette.text_muted)),
+        ]),
+    ];
+
+    // Pad and add footer
+    let used = lines.len() as u16;
+    let remaining = meta_area.height.saturating_sub(used + 1);
+    for _ in 0..remaining {
+        lines.push(Line::from(""));
+    }
     lines.push(Line::from(Span::styled(
-        "Press Esc or i to close",
+        "Esc or i to close",
         Style::default().fg(palette.text_muted),
     )));
 
-    crate::modal::render_modal(frame, "Track Info", lines, 60, 50, palette);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, meta_area);
 }
 
 fn render_settings_overlay(frame: &mut Frame, state: &ShellState, palette: &Palette) {
