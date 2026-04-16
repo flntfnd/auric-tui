@@ -1059,7 +1059,7 @@ fn run_loop(
                 match rx.try_recv() {
                     Ok(ScanProgress::Progress { discovered, path }) => {
                         state.status_message =
-                            Some(format!("Scanning {path}... ({discovered} files found)"));
+                            Some(format!("Scanning {path}... ({discovered} tracks imported)"));
                         // Refresh snapshot frequently to show track count updates
                         if last_scan_refresh.elapsed() >= Duration::from_millis(750) {
                             try_refresh_snapshot(state, &mut refresh);

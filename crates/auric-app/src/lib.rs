@@ -2010,22 +2010,27 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                         let lib_config = lib_config.clone();
                         let db_options = db_options.clone();
                         std::thread::spawn(move || {
-                            // Count files first for progress
-                            let scan_path_ref = scan_path.clone();
-                            let count_tx = tx.clone();
-                            let count_path = scan_path.clone();
+                            let done = std::sync::Arc::new(
+                                std::sync::atomic::AtomicBool::new(false),
+                            );
+
+                            // Progress poller: check DB track count periodically
+                            let progress_tx = tx.clone();
+                            let progress_db_opts = db_options.clone();
+                            let progress_path = scan_path.clone();
+                            let progress_done = std::sync::Arc::clone(&done);
                             std::thread::spawn(move || {
-                                let mut count = 0usize;
-                                let walker = walkdir::WalkDir::new(&count_path);
-                                for entry in walker.into_iter().filter_map(|e| e.ok()) {
-                                    if entry.file_type().is_file() {
-                                        count += 1;
-                                        if count % 500 == 0 {
-                                            let _ = count_tx.send(ScanProgress::Progress {
-                                                discovered: count,
-                                                path: count_path.clone(),
-                                            });
-                                        }
+                                let db = Database::open(&progress_db_opts).ok();
+                                while !progress_done.load(
+                                    std::sync::atomic::Ordering::Relaxed,
+                                ) {
+                                    std::thread::sleep(std::time::Duration::from_millis(750));
+                                    if let Some(ref db) = db {
+                                        let count = db.stats().map(|s| s.track_count).unwrap_or(0);
+                                        let _ = progress_tx.send(ScanProgress::Progress {
+                                            discovered: count as usize,
+                                            path: progress_path.clone(),
+                                        });
                                     }
                                 }
                             });
@@ -2035,10 +2040,13 @@ fn handle_ui_command(app: &mut BootstrappedApp, args: &[String]) -> Result<()> {
                                 let scanner = scanner_from_config(&lib_config, false);
                                 let summary = scanner.scan_path(
                                     &mut db,
-                                    std::path::Path::new(&scan_path_ref),
+                                    std::path::Path::new(&scan_path),
                                 )?;
                                 Ok(summary)
                             })();
+
+                            done.store(true, std::sync::atomic::Ordering::Relaxed);
+
                             match scan_result {
                                 Ok(summary) => {
                                     let _ = tx.send(ScanProgress::Done {
