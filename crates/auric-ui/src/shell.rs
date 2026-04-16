@@ -830,7 +830,6 @@ struct TrackColumnOffsets {
     time_start: u16,
     artist_start: u16,
     quality_start: u16,
-    end: u16,
 }
 
 pub fn run_interactive(
@@ -1483,7 +1482,6 @@ fn render_tracks(frame: &mut Frame, area: Rect, state: &mut ShellState, palette:
         time_start: header_x + (col_icon + col_title) as u16,
         artist_start: header_x + (col_icon + col_title + col_time) as u16,
         quality_start: header_x + (col_icon + col_title + col_time + col_artist + col_fav) as u16,
-        end: header_x + total_w as u16,
     };
 
     let sort_indicator = |col: SortColumn| -> &str {
@@ -2168,7 +2166,6 @@ enum IconToken {
     Folder,
     Playlist,
     Track,
-    NowPlaying,
     Theme,
 }
 
@@ -2177,12 +2174,10 @@ fn icon_glyph(mode: IconMode, token: IconToken) -> &'static str {
         (IconMode::NerdFont, IconToken::Folder) => "󰉋",
         (IconMode::NerdFont, IconToken::Playlist) => "󰲹",
         (IconMode::NerdFont, IconToken::Track) => "󰎆",
-        (IconMode::NerdFont, IconToken::NowPlaying) => "󰎄",
         (IconMode::NerdFont, IconToken::Theme) => "󰔎",
         (IconMode::Ascii, IconToken::Folder) => "[D]",
         (IconMode::Ascii, IconToken::Playlist) => "[P]",
         (IconMode::Ascii, IconToken::Track) => "[*]",
-        (IconMode::Ascii, IconToken::NowPlaying) => ">",
         (IconMode::Ascii, IconToken::Theme) => "[#]",
     }
 }
