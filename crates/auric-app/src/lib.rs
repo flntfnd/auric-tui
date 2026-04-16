@@ -762,6 +762,7 @@ fn handle_playback_transport_command(
         AppCommand::SetVolume(volume) => {
             let normalized = if volume.is_finite() { volume } else { 1.0 };
             app.playback_state.session.volume = normalized.clamp(0.0, 1.0);
+            app.player.set_volume(app.playback_state.session.volume);
         }
         AppCommand::Next => {
             if app.playback_state.queue.is_empty() {
