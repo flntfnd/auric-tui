@@ -136,7 +136,25 @@ fn player_thread(
 
         match cmd {
             PlayerCommand::Load { path } => {
-                play_track(&path, &cmd_rx, &event_tx, &volume, &viz_buf);
+                let result = play_track(&path, &cmd_rx, &event_tx, &volume, &viz_buf);
+                match result {
+                    PlayResult::Finished | PlayResult::Stopped | PlayResult::Error => {}
+                    PlayResult::LoadNew(new_path) => {
+                        // Re-enter the load path iteratively instead of recursing
+                        let mut current_path = new_path;
+                        while let PlayResult::LoadNew(next) = play_track(
+                            &current_path,
+                            &cmd_rx,
+                            &event_tx,
+                            &volume,
+                            &viz_buf,
+                        ) {
+                            current_path = next;
+                        }
+                    }
+                    PlayResult::Shutdown => return,
+                    PlayResult::Disconnected => return,
+                }
             }
             PlayerCommand::SetVolume { volume: v } => {
                 volume.store(v.to_bits(), Ordering::Relaxed);
@@ -148,20 +166,29 @@ fn player_thread(
     }
 }
 
+enum PlayResult {
+    Finished,
+    Stopped,
+    Error,
+    LoadNew(String),
+    Shutdown,
+    Disconnected,
+}
+
 fn play_track(
     path: &str,
     cmd_rx: &mpsc::Receiver<PlayerCommand>,
     event_tx: &mpsc::Sender<PlayerEvent>,
     volume: &Arc<AtomicU32>,
     viz_buf: &Arc<Mutex<Vec<f32>>>,
-) {
+) -> PlayResult {
     let file = match File::open(path) {
         Ok(f) => f,
         Err(e) => {
             let _ = event_tx.send(PlayerEvent::Error {
                 message: format!("failed to open file: {e}"),
             });
-            return;
+            return PlayResult::Error;
         }
     };
 
@@ -182,7 +209,7 @@ fn play_track(
             let _ = event_tx.send(PlayerEvent::Error {
                 message: format!("probe failed: {e}"),
             });
-            return;
+            return PlayResult::Error;
         }
     };
 
@@ -196,7 +223,7 @@ fn play_track(
             let _ = event_tx.send(PlayerEvent::Error {
                 message: "no audio tracks found".into(),
             });
-            return;
+            return PlayResult::Error;
         }
     };
 
@@ -204,7 +231,7 @@ fn play_track(
         let _ = event_tx.send(PlayerEvent::Error {
             message: "unknown codec type".into(),
         });
-        return;
+        return PlayResult::Error;
     }
 
     let sample_rate = match track.codec_params.sample_rate {
@@ -213,7 +240,7 @@ fn play_track(
             let _ = event_tx.send(PlayerEvent::Error {
                 message: "missing sample rate".into(),
             });
-            return;
+            return PlayResult::Error;
         }
     };
 
@@ -238,13 +265,15 @@ fn play_track(
             let _ = event_tx.send(PlayerEvent::Error {
                 message: format!("decoder creation failed: {e}"),
             });
-            return;
+            return PlayResult::Error;
         }
     };
 
     let track_id = track.id;
 
-    // Shared sample buffer between decode thread and cpal callback
+    // Shared sample buffer between decode thread and cpal callback.
+    // Capacity: 2 seconds of audio. The decode loop throttles at 1 second,
+    // so the buffer should not grow much beyond this.
     let buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::with_capacity(
         sample_rate as usize * channels as usize * 2,
     )));
@@ -257,7 +286,7 @@ fn play_track(
             let _ = event_tx.send(PlayerEvent::Error {
                 message: "no output device available".into(),
             });
-            return;
+            return PlayResult::Error;
         }
     };
 
@@ -289,7 +318,7 @@ fn play_track(
             let _ = event_tx.send(PlayerEvent::Error {
                 message: format!("failed to build output stream: {e}"),
             });
-            return;
+            return PlayResult::Error;
         }
     };
 
@@ -297,7 +326,7 @@ fn play_track(
         let _ = event_tx.send(PlayerEvent::Error {
             message: format!("failed to start playback: {e}"),
         });
-        return;
+        return PlayResult::Error;
     }
 
     let _ = event_tx.send(PlayerEvent::Playing {
@@ -308,6 +337,7 @@ fn play_track(
     let mut paused = false;
     let mut last_position_report = Instant::now();
     let mut decoded_samples: u64 = 0;
+    let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     loop {
         // Check commands
@@ -320,21 +350,18 @@ fn play_track(
                 }
                 Ok(PlayerCommand::Stop) => {
                     let _ = event_tx.send(PlayerEvent::Stopped);
-                    return;
+                    return PlayResult::Stopped;
                 }
                 Ok(PlayerCommand::Load { path: new_path }) => {
-                    // Recurse into playing a new track
-                    drop(stream);
-                    play_track(&new_path, cmd_rx, event_tx, volume, viz_buf);
-                    return;
+                    return PlayResult::LoadNew(new_path);
                 }
                 Ok(PlayerCommand::SetVolume { volume: v }) => {
                     volume.store(v.to_bits(), Ordering::Relaxed);
                 }
-                Ok(PlayerCommand::Shutdown) => return,
+                Ok(PlayerCommand::Shutdown) => return PlayResult::Shutdown,
                 Ok(PlayerCommand::Pause) => {}
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return PlayResult::Disconnected,
             }
             continue;
         }
@@ -349,20 +376,18 @@ fn play_track(
             }
             Ok(PlayerCommand::Stop) => {
                 let _ = event_tx.send(PlayerEvent::Stopped);
-                return;
+                return PlayResult::Stopped;
             }
             Ok(PlayerCommand::Load { path: new_path }) => {
-                drop(stream);
-                play_track(&new_path, cmd_rx, event_tx, volume, viz_buf);
-                return;
+                return PlayResult::LoadNew(new_path);
             }
             Ok(PlayerCommand::SetVolume { volume: v }) => {
                 volume.store(v.to_bits(), Ordering::Relaxed);
             }
-            Ok(PlayerCommand::Shutdown) => return,
+            Ok(PlayerCommand::Shutdown) => return PlayResult::Shutdown,
             Ok(PlayerCommand::Resume) => {}
             Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => return,
+            Err(mpsc::TryRecvError::Disconnected) => return PlayResult::Disconnected,
         }
 
         // Throttle if buffer has more than 1 second of audio
@@ -392,13 +417,13 @@ fn play_track(
                     thread::sleep(Duration::from_millis(20));
                 }
                 let _ = event_tx.send(PlayerEvent::TrackFinished);
-                return;
+                return PlayResult::Finished;
             }
             Err(e) => {
                 let _ = event_tx.send(PlayerEvent::Error {
                     message: format!("format read error: {e}"),
                 });
-                return;
+                return PlayResult::Error;
             }
         };
 
@@ -417,15 +442,24 @@ fn play_track(
                 let _ = event_tx.send(PlayerEvent::Error {
                     message: format!("decode error: {e}"),
                 });
-                return;
+                return PlayResult::Error;
             }
         };
 
         let spec = *decoded.spec();
         let num_frames = decoded.frames();
-        let mut sample_buf = SampleBuffer::<f32>::new(num_frames as u64, spec);
-        sample_buf.copy_interleaved_ref(decoded);
-        let samples = sample_buf.samples();
+
+        // Reuse sample buffer across packets when the format hasn't changed,
+        // avoiding a heap allocation per packet.
+        let sbuf = match &mut sample_buf {
+            Some(existing) if existing.capacity() >= num_frames => existing,
+            _ => {
+                sample_buf = Some(SampleBuffer::<f32>::new(num_frames as u64, spec));
+                sample_buf.as_mut().unwrap()
+            }
+        };
+        sbuf.copy_interleaved_ref(decoded);
+        let samples = sbuf.samples();
 
         decoded_samples += num_frames as u64;
 
@@ -434,13 +468,13 @@ fn play_track(
             buf.extend(samples);
         }
 
-        // Store latest samples for visualization
+        // Store latest samples for visualization (capped at 2048 samples)
         if let Ok(mut vb) = viz_buf.lock() {
             vb.clear();
-            vb.extend_from_slice(samples);
-            if vb.len() > 2048 {
-                let start = vb.len() - 2048;
-                *vb = vb[start..].to_vec();
+            if samples.len() <= 2048 {
+                vb.extend_from_slice(samples);
+            } else {
+                vb.extend_from_slice(&samples[samples.len() - 2048..]);
             }
         }
 

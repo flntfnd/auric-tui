@@ -148,7 +148,6 @@ dependencies = [
 name = "auric-audio"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "cpal",
  "serde",
  "symphonia",

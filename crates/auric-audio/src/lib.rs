@@ -1,6 +1,5 @@
 pub mod player;
 
-use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -16,18 +15,6 @@ pub struct StreamFormat {
     pub sample_rate: u32,
     pub channels: u16,
     pub bit_depth: u16,
-}
-
-#[async_trait]
-pub trait DecoderBackend: Send + Sync {
-    async fn supports(&self, source_uri: &str) -> bool;
-    async fn inspect_format(&self, source_uri: &str) -> Result<StreamFormat, AudioError>;
-}
-
-#[async_trait]
-pub trait OutputBackend: Send + Sync {
-    async fn list_devices(&self) -> Result<Vec<AudioDevice>, AudioError>;
-    async fn start(&self) -> Result<(), AudioError>;
 }
 
 /// A node in the DSP processing chain.
@@ -184,18 +171,6 @@ impl SymphoniaDecoderBackend {
     }
 }
 
-#[async_trait]
-impl DecoderBackend for SymphoniaDecoderBackend {
-    async fn supports(&self, source_uri: &str) -> bool {
-        parse_local_source_uri(source_uri).is_ok()
-    }
-
-    async fn inspect_format(&self, source_uri: &str) -> Result<StreamFormat, AudioError> {
-        let path = parse_local_source_uri(source_uri)?;
-        self.inspect_path(&path)
-    }
-}
-
 pub struct CpalOutputBackend;
 
 impl CpalOutputBackend {
@@ -228,19 +203,6 @@ impl CpalOutputBackend {
             });
         }
         Ok(out)
-    }
-}
-
-#[async_trait]
-impl OutputBackend for CpalOutputBackend {
-    async fn list_devices(&self) -> Result<Vec<AudioDevice>, AudioError> {
-        self.list_devices_blocking()
-    }
-
-    async fn start(&self) -> Result<(), AudioError> {
-        Err(AudioError::BackendUnavailable(
-            "stream start is not implemented yet".to_string(),
-        ))
     }
 }
 
